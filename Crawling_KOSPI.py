@@ -119,11 +119,13 @@ def months_loading(object_dict, path, object_filename, n_month=15, company_tf=Fa
                 for files in file_list:
                     name = files + "." if files == "JYP Ent" else files  # JYP 빌어먹을 얘들 회사이름 JYP Ent.임
 
-                with open(dir + name, 'rb') as f:
-                    data = pickle.load(f)
+                    with open(dir + name, 'rb') as f:
+                        data = pickle.load(f)
+                    for each_data in data:
+                        object_dict[name][1][each_data[0]] = each_data
+
             except FileNotFoundError:
                 print("{} - {} 항목 없음, 건너뜀".format(year, month))
-
 
         else:
             try:
@@ -1517,33 +1519,16 @@ def KOSPI_KOSDAQ_calculate(company_price_dict, KOSPI_data_dict, KOSDAQ_data_dict
 
 if __name__ == '__main__':
 
-    company_list_main = []
-
-
-    try:
-        with open("company_pickle", 'rb') as f:
-            company_pickle = pickle.load(f)
-        company_list_main = company_pickle[0]
-        company_dict_main = company_pickle[1]
-    except Exception:
-        company_pickle = {}
-        company_list_main = []
-        company_dict_main = {}
-
-    ### company 로딩
-
-
-    company_dict = [None,None]
+    # company 로딩
+    company_pickle = [None,None]
     with open("Files/code_list", 'rb') as f:
-        company_dict[0] = pickle.load(f)
+        company_pickle[0] = pickle.load(f)
     with open("Files/company_info", 'rb') as f:
-        company_dict[1] = pickle.load(f)
+        company_pickle[1] = pickle.load(f)
 
-    months_loading(company_dict[1], "Stock_Price", "", company_tf=True)
+    months_loading(company_pickle[1], "Stock_Price", "", company_tf=True)
 
-    asyncio.run(dispersion_crawling_data(company_list_main, company_dict_main, limits=20))
-
-    ### KOSPI, KOSDAQ 크롤링
+    # KOSPI, KOSDAQ 로딩 크롤링
     try:
         KOSPI_dict = {}
         months_loading(KOSPI_dict, "Market", "KOSPI")
@@ -1571,6 +1556,8 @@ if __name__ == '__main__':
     except FileNotFoundError:
         kosis_dict = {}
 
+    # 크롤링
+    asyncio.run(dispersion_crawling_data(company_pickle[0], company_pickle[1], limits=20))
     KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict = asyncio.run(market_crawling(
                                             KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict
                                             ))
@@ -1586,12 +1573,28 @@ if __name__ == '__main__':
     with open("Files/kosis_dict", 'wb') as f:
         pickle.dump(kosis_dict, f)
     '''
+
     overwrite_tf = False
+    with open("Files/code_list", 'wb') as f:
+        pickle.dump(company_pickle[0], f)
+
+    # 회사 기본정보, 연간재무, 분기재무
+    company_noprice_dict = {}
+    for key in company_pickle[1].keys():
+        company_noprice_dict[key] = [
+            company_pickle[1][key][0],
+            {},
+            company_pickle[1][key][2],
+            company_pickle[1][key][3]
+        ]
+    with open("Files/company_info", "wb") as f:
+        pickle.dump(company_noprice_dict, f)
+
     for company_name in company_pickle[1].keys():
         print(company_name + "종목 날짜 분리 중")
         if company_name != "종목명":
             object_dict = company_pickle[1][company_name][1]
-            split_date(object_dict, "Stock_Price", company_name, overwrite=True)
+            split_date(object_dict, "Stock_Price", company_name, overwrite=overwrite_tf)
 
     split_date(KOSPI_dict, "Market", "KOSPI", overwrite=overwrite_tf)
     split_date(KOSDAQ_dict, "Market", "KOSDAQ", overwrite=overwrite_tf)
