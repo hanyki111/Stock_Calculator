@@ -1,5 +1,6 @@
 import pickle
 import numpy as np
+import pandas as pd
 
 import datetime
 from datetime import datetime as dt
@@ -65,7 +66,7 @@ class FGI:
         
         for i in range(len(ratio_data_list)):
             ratio_data_list[i].append(
-                cal_cumulative_dist(ratio_data_list[i][3], ratio_mean, ratio_std)
+                self.cal_cumulative_dist(ratio_data_list[i][3], ratio_mean, ratio_std)
             )
             
             ratio_data_dict[ratio_data_list[i][0]] = ratio_data_list[i]
@@ -97,7 +98,7 @@ class FGI:
         for i in range(len(estrangement_average125_kospi_list)):
             
             estrangement_average125_kospi_list[i].append(
-                cal_cumulative_dist(estrangement_average125_kospi_list[i][3], 
+                self.cal_cumulative_dist(estrangement_average125_kospi_list[i][3],
                                 estrangement_mean,
                                 estrangement_std)
             )
@@ -141,7 +142,7 @@ class FGI:
         for i in range(len(stock_bond_list)):
             
             stock_bond_list[i].append(
-                cal_cumulative_dist(
+                self.cal_cumulative_dist(
                     stock_bond_list[i][4],
                     stock_bond_mean,
                     stock_bond_std
@@ -182,7 +183,7 @@ class FGI:
             date = credit_spec_list[i][0]
             
             credit_spec_list[i].append(
-                cal_cumulative_dist(
+                self.cal_cumulative_dist(
                     credit_spec_list[i][3],
                     credit_spec_mean,
                     credit_spec_std
@@ -229,7 +230,7 @@ class FGI:
         
         for i in range(len(stock_breath_list)):
             stock_breath_list[i].append(
-                cal_cumulative_dist(
+                self.cal_cumulative_dist(
                 stock_breath_list[i][7],
                 stock_breath_mean,
                 stock_breath_std)            
@@ -265,7 +266,7 @@ class FGI:
         for i in range(len(estrangement_vkospi_list)):
             
             estrangement_vkospi_list[i].append(
-                -1 * cal_cumulative_dist(estrangement_vkospi_list[i][3], 
+                -1 * self.cal_cumulative_dist(estrangement_vkospi_list[i][3],
                                 estrangement_mean,
                                 estrangement_std)
             )
@@ -277,12 +278,12 @@ class FGI:
     
     def fear_greed_index(self, KOSPI_dict, KOSDAQ_dict, bond_dict_2y, vkospi_dict):
     
-        ratio_highlow_dict = ratio_52_highlow(KOSPI_dict, KOSDAQ_dict)
-        kospi_estrangement_dict = average125_kospi_estrangement(KOSPI_dict)
-        safe_haven_dict = safe_haven_demand(KOSPI_dict, bond_dict_2y)
-        credit_spec_dict = credit_vs_speculation(bond_dict_2y)
-        stock_tradevol_dict = stock_tradevol_breath(KOSPI_dict, KOSDAQ_dict)
-        vkospi_estrangement_dict = average50_vkospi_estrange(vkospi_dict)
+        ratio_highlow_dict = self.ratio_52_highlow(KOSPI_dict, KOSDAQ_dict)
+        kospi_estrangement_dict = self.average125_kospi_estrangement(KOSPI_dict)
+        safe_haven_dict = self.safe_haven_demand(KOSPI_dict, bond_dict_2y)
+        credit_spec_dict = self.credit_vs_speculation(bond_dict_2y)
+        stock_tradevol_dict = self.stock_tradevol_breath(KOSPI_dict, KOSDAQ_dict)
+        vkospi_estrangement_dict = self.average50_vkospi_estrange(vkospi_dict)
         
         dicts_list = [ratio_highlow_dict,
                     kospi_estrangement_dict,
@@ -362,7 +363,7 @@ class dnn:
         # 이 계산은 한 번만 하면 됨. 굳이 이전처럼 매번 계산할 필요가 없음
         
         temp_list = []
-        for key in company_dict.keys():
+        for keys in company_dict.keys():
             try:
                 beta_52weeks = company_dict[keys][0][21]
                 temp_list.append((present_idx - past_idx) * beta_52weeks)
