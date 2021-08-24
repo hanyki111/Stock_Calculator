@@ -3,9 +3,9 @@ import asyncio
 import datetime
 import pickle
 from glob import glob
-import subprocess
+
 import sys
-import os
+
 import numpy as np
 import requests
 from bs4 import BeautifulSoup
@@ -571,11 +571,22 @@ async def price_crawling_async(company_code, company_name, price_data_dict, upda
                     items[i][0] = items[i][0].replace('.', '-')  # 날짜를 ####-##-## 형식으로
                     items[i][6] = items[i][6].replace("%", '')
 
-                    if items[i][0] not in price_data_dict.keys():
+                    # 데이터형식 변경
+                    temp_list = np.zeros(len(items[i]), dtype=object)
+                    temp_list[0] = items[i][0]
+                    for j in range(1, 6):
+                        temp_list[j] = int(items[i][j])
+                    temp_list[6] = float(items[i][6])
+
+                    items[i] = temp_list[:]
+
+
+                    if items[i][0] not in price_data_dict.keys() or update:
                         price_data_dict[items[i][0]] = items[i]
-                    elif update == False:
+                    else:
                         page_num_switch = True
                         break
+
                 else:  # items[i] == [] :
                     page_num_switch = True
                     break;
@@ -586,11 +597,11 @@ async def price_crawling_async(company_code, company_name, price_data_dict, upda
         try:  # Cal_52HighLow, TradingVol 계산을 여기서 처리
             price_data_values = np.array(list(price_data_dict.values()))
             for i in range(len(price_data_values)):
-                if price_data_values[i][8] == 0 or update == True:
+                if price_data_values[i][8] == 0 or price_data_values[i][8] == '0' or update == True:
                     try:
-                        if np.min(price_data_values[i: i + 260][:, 2]) == price_data_values[i][2]:  # 52주 최소가 해당 값
+                        if np.min(np.array(price_data_values[i: i + 260][:, 2], dtype=int)) == int(price_data_values[i][2]):  # 52주 최소가 해당 값
                             price_data_values[i][8] = 'low'
-                        elif np.max(price_data_values[i: i + 260][:, 2]) == price_data_values[i][2]:  # 52주 최대가 해당 값
+                        elif np.max(np.array(price_data_values[i: i + 260][:, 2], dtype=int)) == int(price_data_values[i][2]):  # 52주 최대가 해당 값
                             price_data_values[i][8] = 'high'
                         else:
                             price_data_values[i][8] = '1'
@@ -599,12 +610,12 @@ async def price_crawling_async(company_code, company_name, price_data_dict, upda
                 else:  # 이 이후의 값들은 이미 계산되어 있음. update==false임
                     break
 
-                if price_data_values[i][9] == 0 or update == True:
+                if price_data_values[i][9] == 0 or price_data_values[i][9] =='0' or update == True:
                     try:
-                        if price_data_values[i][2] >= price_data_values[i + 1][2]:
-                            price_data_values[i][9] = price_data_values[i][2]
+                        if int(price_data_values[i][2]) >= int(price_data_values[i + 1][2]):
+                            price_data_values[i][9] = int(price_data_values[i][2])
                         else:
-                            price_data_values[i][9] = -1 * price_data_values[i][2]
+                            price_data_values[i][9] = -1 * int(price_data_values[i][2])
                     except IndexError:
                         price_data_values[i][9] = 0
                 else:  # 이 이후의 값들은 이미 계산되어 있음. update==false임
