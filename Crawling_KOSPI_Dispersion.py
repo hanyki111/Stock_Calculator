@@ -787,7 +787,7 @@ if __name__ == '__main__':
     try:
         limits = int(sys.argv[2])
     except Exception:
-        limits = 10
+        limits = 5
 
     company_list, company_dict = pickle_load()    
     company_dict = asyncio.run(company_crawling_async(company_list, company_dict, update=update, limits=limits))

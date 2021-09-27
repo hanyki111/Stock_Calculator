@@ -1,16 +1,172 @@
-import pickle
+# import ast
+import json
 import numpy as np
 import pandas as pd
+import pickle
+import random
+import time
 
 import datetime
 from datetime import datetime as dt
 from datetime import timedelta as td
 from dateutil.relativedelta import relativedelta
 
+from tensorflow import keras
 from scipy import stats
 
 import os
 
+
+class loading:
+        
+    def split_date(self, object_dict, path, name, overwrite=False):
+        # bond_dict의 경우 하위 dict가 3m, 6m ...이므로 각 3m, 6m...을 object_dict로 넣어야 함
+
+        dates = list(object_dict.keys())
+
+        yearmonth_list = []
+        for date in dates:
+            yearmonth = date[:7]
+            if yearmonth not in yearmonth_list:
+                yearmonth_list.append(yearmonth)
+
+        yearmonth_dict = dict.fromkeys(yearmonth_list, [])
+        for date in dates:
+            templist = yearmonth_dict[date[:7]][:]
+            templist.append(date)
+            yearmonth_dict[date[:7]] = templist
+
+        save_dict = dict.fromkeys(yearmonth_list, [])
+        ### 개별 가격정보의 키를 이용하여 월별 데이터 저장
+        for date in dates:
+            year = date[:4]
+            month = date[5:7]
+            if not os.path.isdir("Files/" + path + "/" + year):
+                os.makedirs("Files/" + path + "/" + year)
+            if not os.path.isdir("Files/" + path + "/" + year + "/" + month):
+                os.makedirs("Files/" + path + "/" + year + "/" + month)
+            '''
+            if np.ndim(object_dict[date]) == 1:
+                temp = object_dict[date]
+            else:
+            '''
+            temp = save_dict[year+'-'+month][:]
+            temp.append(object_dict[date])
+            save_dict[year+'-'+month] = temp
+
+        for i in range(len(save_dict.keys())):
+
+            key = list(save_dict.keys())[i]
+            year = key[:4]
+            month = key[5:7]
+            if not os.path.isdir("Files/" + path + "/" + year):
+                os.makedirs("Files/" + path + "/" + year)
+            if not os.path.isdir("Files/" + path + "/" + year + "/" + month):
+                os.makedirs("Files/" + path + "/" + year + "/" + month)
+
+            dir_file = "Files/" + path + "/" + year + "/" + month + "/" + name
+
+            ### 파일이 이미 존재하느냐
+            if not overwrite:  # overwrite == False --> 덮어쓰지 않을 때
+                if not os.path.isfile(dir_file):
+                    with open(dir_file, 'wb') as f:
+                        pickle.dump(save_dict[key], f)
+                elif i <= 1:
+                    with open(dir_file, 'wb') as f:
+                        pickle.dump(save_dict[key], f)
+                else:  # 덮어쓰기 --> False 상태, 파일 있고 i >=2 --> 반복문 제외
+                    break
+            else:  # overwrite == True --> 덮어쓸 때
+                with open(dir_file, 'wb') as f:
+                    pickle.dump(save_dict[key], f)
+
+        pass  # split_date 의 끝
+
+
+    def months_loading(self, object_dict, path, object_filename, n_month=15, company_tf=False):
+
+        date_list = []
+        date = dt.today()
+
+        for i in range(n_month):
+            # for i in range(n_month):
+            date_list.append(str(date - relativedelta(months=i))[:7])
+
+        for dates in date_list:
+            print("{} 가격 정보 로딩 중 ...".format(dates))
+            year = dates[:4]
+            month = dates[5:7]
+            dir = "Files/" + path + "/" + year + "/" + month + "/"
+
+            if company_tf:  # 회사 정보를 로딩하는 경우
+                try:
+                    file_list = os.listdir(dir)
+                    for files in file_list:
+                        name = files + "." if files == "JYP Ent" else files  # JYP 빌어먹을 얘들 회사이름 JYP Ent.임
+
+                        with open(dir + name, 'rb') as f:
+                            data = pickle.load(f)
+                        for each_data in data:
+                            object_dict[name][1][each_data[0]] = each_data
+
+                except FileNotFoundError:
+                    print("{} - {} 항목 없음, 건너뜀".format(year, month))
+
+            else:
+                try:
+                    file = dir + object_filename
+                    with open(file, 'rb') as f:
+                        data = pickle.load(f)
+                    if type(data[0]) == list or type(data[0]) == np.ndarray:
+                        for each_data in data:
+                            object_dict[each_data[0]] = each_data
+                    else:  # kosis_dict의 경우
+                        object_dict[data[0]] = data
+                except FileNotFoundError:
+                    print("{} - {} 항목 없음, 건너뜀".format(year, month))
+        # return object_dict
+        pass  # months_loading의 끝
+
+
+    def loading_data(self, n_month=15):
+        # company 로딩
+        company_pickle = [None,None]
+        with open("Files/code_list", 'rb') as f:
+            company_pickle[0] = pickle.load(f)
+        with open("Files/company_info", 'rb') as f:
+            company_pickle[1] = pickle.load(f)
+
+        self.months_loading(company_pickle[1], "Stock_Price", "", n_month=n_month, company_tf=True)
+
+        # KOSPI, KOSDAQ, bond, vkospi, kosis 로딩
+        try:
+            KOSPI_dict = {}
+            self.months_loading(KOSPI_dict, "Market", "KOSPI")
+        except FileNotFoundError:
+            KOSPI_dict = {}
+        try:
+            KOSDAQ_dict = {}
+            self.months_loading(KOSDAQ_dict, "Market", "KOSDAQ")
+        except FileNotFoundError:
+            KOSDAQ_dict = {}
+        try:
+            bond_dict = {'3m' : {}, '6m' : {}, '9m' : {}, '1y' : {}, '1y6m' : {}, '2y' : {}, '3y' : {}, '5y' : {}}
+            for key in bond_dict.keys():
+                self.months_loading(bond_dict[key], "Market", "bond_"+key)
+        except FileNotFoundError:
+            bond_dict = {'3m' : {}, '6m' : {}, '9m' : {}, '1y' : {}, '1y6m' : {}, '2y' : {}, '3y' : {}, '5y' : {}}
+        try:
+            vkospi_dict = {}
+            self.months_loading(vkospi_dict, "Market", "vkospi")
+        except FileNotFoundError:
+            vkospi_dict = {}
+        try:
+            kosis_dict = {}
+            self.months_loading(kosis_dict, "Market", "kosis")
+        except FileNotFoundError:
+            kosis_dict = {}
+
+        return company_pickle, KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict
 
 ### 긁어온 정보를 계산한다
 
@@ -311,7 +467,7 @@ class FGI:
         keys.sort(reverse=True)
         
         fgi_dict = {}
-        fgi_list = []
+        # fgi_list = []
         
         for dates in keys:
             try:
@@ -322,8 +478,8 @@ class FGI:
                 mean = np.mean(np.array(temp_list)[1:].astype(float))
                 temp_list.append(mean)
                 
-                fgi_list.append(temp_list)
-                fgi_dict[dates] = fgi_list
+                # fgi_list.append(temp_list)
+                fgi_dict[dates] = temp_list
             except KeyError:
                 
                 pass
@@ -331,7 +487,11 @@ class FGI:
         return fgi_dict
         pass  # fear_greed_index 의 끝
 
-class dnn:
+class DNN(FGI):
+
+    # 전체 시장의 mean, std를 계산하는 함수를 따로 두고
+    # 해당 값을 이용해서 각 종목 / 전체 종목의 value를 두는 함수를 추가로 생성
+    # 아래는 전체 시장의 mean, std를 계산하는 함수
     def market_index(self, kosis_dict, year, month, day=28):
         # day 는 다른 것과 모양을 맞추기 위해 그냥 넣음
         # kosis_dict[date] = 월, 선행종합지수. 선행종합지수 순환변동치, 동행지수, 동행지수 순환변동치, 후행종합지수
@@ -357,231 +517,677 @@ class dnn:
         past_idx_predict = average_index_567 * 0.58 + 41.93
         
         return present_idx_predict, past_idx_predict
-
-    def beta52weeks_meanstd(self, present_idx, past_idx, company_dict):
-        # 52주 베타의 std, mean만 계산한다
-        # 이 계산은 한 번만 하면 됨. 굳이 이전처럼 매번 계산할 필요가 없음
+    
+    # 이 함수는 위의 market_index를 대입하여 전체 company의 mean, std 점수를 낸다. 
+    def company_market_beta(self, company_dict, present_market_idx, past_market_idx):
         
-        temp_list = []
+        temp_beta_list = []
         for keys in company_dict.keys():
             try:
-                beta_52weeks = company_dict[keys][0][21]
-                temp_list.append((present_idx - past_idx) * beta_52weeks)
-            except Exception:
+                beta = company_dict[keys][0][21]
+                temp_beta_list.append((float(present_market_idx) - float(past_market_idx)) * float(beta))
+            except Exception as e:
+                print(keys, e)
                 pass
-            
-        temp_np = np.array(temp_list)
-        mean_beta = np.mean(temp_np)
-        std_beta = np.std(temp_np)
+                
+        temp_beta_np = np.array(temp_beta_list)
+        temp_beta_mean = temp_beta_np.mean()
+        temp_beta_std = temp_beta_np.std()
         
-        return mean_beta, std_beta
-        pass  # beta52weeks_meanstd 의 끝
+        return temp_beta_mean, temp_beta_std
+        pass  # company_market_beta의 끝
 
-    def per_meanstd(self, company_dict, year, month, day=28):
-        
+    def per_pbr_debt_meanstd(self, company_dict, pbr_per_debt, year, month, day=28):
+        # 1 / pbr, 1 / per인 점을 명심한다
+        # debt 는 여기서는 그대로 나가지만 나중에 계산할 땐 1점에서 빼야한다는 점을 명심한다
         # company_dict == company_pickle[1]
         #  매출액, 영업이익, 당기순이익, 영업이익률, 순이익률, ROE, 부채비율, 당좌비율, 유보율, EPS, PER, BPS, PBR
+        # mean, std가 나온다
         
-        input_date = datetime.date(year=year, month=month, day=day)
-        
+        input_date = datetime.datetime(year=year, month=month, day=day)
+
         temp_list = []
+        if pbr_per_debt == 'pbr':
+            pbr_per_debt_index = 12
+        elif pbr_per_debt == 'per':  # per
+            pbr_per_debt_index = 10
+        elif pbr_per_debt == 'debt':
+            pbr_per_debt_index = 6
         
+
         for keys in company_dict.keys():
             if company_dict[keys][3] != {}:
                 term_list = list(company_dict[keys][3].keys())
                 term_list.sort(reverse=True)
 
                 for i in range(len(term_list)):
-                    term_date = datetime.date(year=int(term_list[i][:4]), month=int(term_list[i][5:8]), day=28)
+                    term_date = datetime.datetime(year=int(term_list[i][:4]), month=int(term_list[i][5:7]), day=28)
                     if input_date - term_date >= datetime.timedelta(0):
                         #print(term_date)
                         list_index = i
                         break
 
-                if float(company_dict[keys][3][term_list[list_index]][10]) == -1:  # 데이터가 전부 -1일 경우 다음 분기 정보 사용
+                if float(company_dict[keys][3][term_list[list_index]][pbr_per_debt_index]) == -1:  # 데이터가 전부 -1일 경우 다음 분기 정보 사용
                     list_index += 1
 
-                if float(company_dict[keys][3][term_list[list_index]][10]) == -1:  # 2번째
-                    print("Error")
+                if float(company_dict[keys][3][term_list[list_index]][pbr_per_debt_index]) == -1:  # 2번째
+                    print("Error {}종목".format(keys))
 
                 try:
-                    # 각 회사의 1 / PER 을 넣는다 --> 인덱스 10
-                    temp_list.append(
-                        1 / float(company_dict[keys][3][term_list[list_index]][10])
-                    )
+                    if pbr_per_debt == 'debt':  # debt : 그대로 넣는다
+                        temp_list.append(float(company_dict[keys][3][term_list[list_index]][pbr_per_debt_index]))                    
+                    else: # pbr, per
+                        # 각 회사의 1 / PER 을 넣는다 --> 인덱스 10
+                        temp_list.append(
+                            1 / float(company_dict[keys][3][term_list[list_index]][pbr_per_debt_index])
+                        )
                 except Exception:  # PER 없는 회사
                     pass
+
+        temp_np = np.array(temp_list)
+        mean = np.mean(temp_np)
+        std = np.std(temp_np)
+
+        return mean, std
+        pass  # def per_meanstd의 끝
+
+    def company_price_variability_meanstd(self, company_dict, year=0, month=0, day=28):
+        # (52주 최고 - 최저) / 52주 최저
         
+        variability_list = []
+        for keys in company_dict.keys():
+            try:
+                variability = (int(company_dict[keys][0][8]) - int(company_dict[keys][0][9])) / int(company_dict[keys][0][9])
+                variability_list.append(variability)            
+            except Exception as e:
+                pass
+            
+        variability_np = np.array(variability_list)
+        mean = np.mean(variability_np)
+        std = np.std(variability_np)
+        
+        return mean, std
+        pass  # company_price_variability_meanstd의 끝
+    
+    def company_trade_vol_meanstd(self, company_dict, year, month, day):
+        # 5일 평균 거래량 * 가격
+        # 특정 날짜의 전체 회사의 거래량 * 가격을 이용한 mean, std
+
+        input_date = datetime.datetime(year=year, month=month, day=day)
+        trade_vol_list = []
+        
+        
+        for keys in company_dict.keys():
+            if company_dict[keys][1] != {}:
+                term_list = list(company_dict[keys][1].keys())
+                term_list.sort(reverse=True)
+                
+                for i in range(len(term_list)):
+                    term_date = datetime.datetime(year=int(term_list[i][:4]), month=int(term_list[i][5:7]), day=int(term_list[i][8:]))
+                    if input_date - term_date >= datetime.timedelta(0):
+                        #print(term_date)
+                        list_index = i
+                        break
+                
+                try:
+                    trade_vol = []
+                    for i in range(5):
+                        trade_vol.append(company_dict[keys][1][term_list[list_index + i]][1] * 
+                                        company_dict[keys][1][term_list[list_index + i]][2]) # 가격 * 거래량
+                    mean_trade_vol = np.array(trade_vol, dtype=np.uint64).mean()
+                    trade_vol_list.append(mean_trade_vol)
+                except Exception as e:
+                    print(e, keys)
+                    pass  
+                
+        trade_vol_np = np.array(trade_vol_list)
+        mean = np.mean(trade_vol_np)
+        std = np.std(trade_vol_np)                
+
+        return mean, std
+        pass  # def company_trade_vol_meanstd의 끝
+    
+    def company_weight_meanstd(self, company_dict, year, month, day):
+        
+        input_date = datetime.datetime(year=year, month=month, day=day)
+        weight_list = []
+        
+        
+        for keys in company_dict.keys():
+            if company_dict[keys][1] != {}:
+                term_list = list(company_dict[keys][1].keys())
+                term_list.sort(reverse=True)
+                
+                for i in range(len(term_list)):
+                    term_date = datetime.datetime(year=int(term_list[i][:4]), month=int(term_list[i][5:7]), day=int(term_list[i][8:]))
+                    if input_date - term_date >= datetime.timedelta(0):
+                        #print(term_date)
+                        list_index = i
+                        break
+                
+                try:
+                    # 가격 * 상장 주식 수
+                    weight_list.append(
+                        int(
+                        int(company_dict[keys][1][term_list[list_index]][1]) *
+                        int(company_dict[keys][0][3])
+                        /10000))
+                except Exception as e:
+                    print(e, keys)
+                    pass  
+                
+        weight_np = np.array(weight_list)
+        mean = np.mean(weight_np)
+        std = np.std(weight_np)                
+
+        return mean, std
+        pass  # def company_weightmeanstd의 끝
+        
+    # 이 함수는 개별 회사 단위로 들어가며 for keys in dict.keys() 를 해줘야 한다
+    def company_price_multi(self, company_dict, company_name, year, month, day):
+        #각 회사의 그 당시 가격이 52주 최저 대비 몇 배인가 --> 를 역수로 (1/그 수) 하여 리스트에 추가
+        #52주 최저는 당시 52주 최저가 아니라 현재 기록되어 있는 바를 사용
+        input_date = datetime.datetime(year=year, month=month, day=day)
+        
+        temp_list = []
+        key = company_name   
+        
+        for dates in company_dict[key][1].keys():
+            try:        
+                temp_list.append(
+                    # 52주 최저 / 해당 날짜 가격
+                int(company_dict[key][0][9]) / int(company_dict[key][1][dates][1])
+                )
+            except Exception as e:
+                print("")
+                pass
+
         temp_np = np.array(temp_list)
         mean = np.mean(temp_np)
         std = np.std(temp_np)
         
-        return mean, std
-        pass  # def per_meanstd의 끝
+        # 해당 날짜의 값 구하기
+        term_list = list(company_dict[key][1].keys())
+        for list_index in range(len(term_list)):
+            if input_date - datetime.datetime.strptime(term_list[list_index], '%Y-%m-%d') >=  datetime.timedelta(0):
+                break 
+        
+        try:
+            company_price_multi = company_dict[key][0][9] / company_dict[key][1][term_list[list_index]][1]
+            output = FGI.cal_cumulative_dist(
+                company_price_multi,
+                mean,
+                std
+                )
+        except:
+            output = -1
+            
+        return output
+        pass  # company_price_multi 의 끝
 
-    def week_52_beta_with_market_index(self):
+    # 이 함수는 개별 회사 단위로 들어가며 for keys in dict.keys() 를 해줘야 한다
+    def company_days_moving(self, company_dict, company_name, d20_d5_number, year, month, day):
+        # 20일 이평선 +- std 어디에 위치해있는가? (볼린져 밴드)
+        # 위의 것과는 다르게 이 함수는 개별 회사 단위로 들어가며 for keys in dict.keys() 를 해줘야 한다    
+        
+        key = company_name    
+        price_list = np.array(list(company_dict[key][1].values()))
+        
+        # 20d, 5d rolling mean을 시행하고, 없는 값들을 제외한다
+        price_rolling_mean = np.array(pd.DataFrame(price_list[:, 1]).rolling(window=d20_d5_number).mean().dropna())
+        # dtype을 object로 변환
+        price_rolling_mean = price_rolling_mean.astype(object)
+        
+        # std에 대해서 동일 항목 수행
+        price_rolling_std = np.array(pd.DataFrame(price_list[:, 1]).rolling(window=d20_d5_number).mean().dropna())
+        price_rolling_std = price_rolling_std.astype(object)
+        price_mean_dict = {}
+        price_std_dict = {}
+        for i in range(len(price_rolling_mean)):
+            # price_list의 위에서부터 20개가 rolling_mean의 0번 값이었다
+            # 날짜를 삽입
+            price_mean_dict[price_list[i][0]] = price_rolling_mean[i][0]
+            price_std_dict[price_list[i][0]] = price_rolling_std[i][0]
+        
+        str_date = str(year)+'-'+str(month).zfill(2)+'-'+str(day).zfill(2)
+        
+        # 날짜가 없으면 에러를 일으키는게 맞다
+        if not str_date in price_mean_dict.keys():
+            print("해당 날짜 자료 없음")
+            raise IndexError
+            
+        price_now = int(company_dict[key][1][str_date][1])
+        mean_now = price_mean_dict[str_date]
+        std_now = price_std_dict[str_date]
+        
+        output = self.cal_cumulative_dist(price_now, mean_now, std_now)
+        return output    
+        pass  # company_days_moving의 끝
+    
 
-        pass
+    # 전체 점수
+    def entire_market_meanstd(self, kosis_dict, company_dict, year, month, day):
+        
+        present_idx, past_idx = self.market_index(kosis_dict, year, month, day)
+        mean_marketbeta, std_marketbeta = self.company_market_beta(company_dict, present_idx, past_idx)
+        mean_company_profit, std_company_profit = self.per_pbr_debt_meanstd(company_dict, 'per', year, month, day)
+        mean_company_property, std_company_property = self.per_pbr_debt_meanstd(company_dict, 'pbr', year, month, day)
+        mean_company_debt, std_company_debt = self.per_pbr_debt_meanstd(company_dict, 'debt', year, month, day)
+        mean_company_variability, std_company_variability = self.company_price_variability_meanstd(company_dict)
+        mean_company_tradevol, std_company_tradevol = self.company_trade_vol_meanstd(company_dict, year, month, day)
+        mean_company_weight, std_company_weight = self.company_weight_meanstd(company_dict, year, month, day)
+        
+        output = [
+        mean_marketbeta,
+        std_marketbeta,
+        mean_company_profit,
+        std_company_profit,
+        mean_company_property,
+        std_company_property,
+        mean_company_debt,
+        std_company_debt,
+        mean_company_variability,
+        std_company_variability,
+        mean_company_tradevol,
+        std_company_tradevol,
+        mean_company_weight,
+        std_company_weight]
+        
+        return output
+        pass  # entire_market_meanstd의 끝
 
-### ai_recommand --> list, score 계산
-def ai_recommand_calculate(self):
+    def company_score(self, company_dict, fear_greed_index_dict, keys, year, month, day, mean_marketbeta, std_marketbeta, mean_company_profit,
+        std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
+        std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight):       
+        # keys = company_name
+        
+        # year, month, day로 만드는 date (str)
+        date = str(year) + '-' + str(month).zfill(2) + '-' + str(day).zfill(2)
+        input_date = datetime.datetime(year=year, month=month, day=day)
+        
+        fear_greed_index = fear_greed_index_dict[date]
+        
+        # 52주 베타
+        company_marketbeta = float(company_dict[keys][0][21])
+        company_marketbeta_score = self.cal_cumulative_dist(company_marketbeta, mean_marketbeta, std_marketbeta)
+        
+        # 1/per (profit) ~ company_debt까지.
+        # 해당 부분에서 사용할 
+        term_list = list(company_dict[keys][3].keys())
+        term_list.sort(reverse=True)
 
-
-
-
-    pass
-
-
-def split_date(object_dict, path, name, overwrite=False):
-    # bond_dict의 경우 하위 dict가 3m, 6m ...이므로 각 3m, 6m...을 object_dict로 넣어야 함
-
-    dates = list(object_dict.keys())
-
-    yearmonth_list = []
-    for date in dates:
-        yearmonth = date[:7]
-        if yearmonth not in yearmonth_list:
-            yearmonth_list.append(yearmonth)
-
-    yearmonth_dict = dict.fromkeys(yearmonth_list, [])
-    for date in dates:
-        templist = yearmonth_dict[date[:7]][:]
-        templist.append(date)
-        yearmonth_dict[date[:7]] = templist
-
-    save_dict = dict.fromkeys(yearmonth_list, [])
-    ### 개별 가격정보의 키를 이용하여 월별 데이터 저장
-    for date in dates:
-        year = date[:4]
-        month = date[5:7]
-        if not os.path.isdir("Files/" + path + "/" + year):
-            os.makedirs("Files/" + path + "/" + year)
-        if not os.path.isdir("Files/" + path + "/" + year + "/" + month):
-            os.makedirs("Files/" + path + "/" + year + "/" + month)
-        '''
-        if np.ndim(object_dict[date]) == 1:
-            temp = object_dict[date]
-        else:
-        '''
-        temp = save_dict[year+'-'+month][:]
-        temp.append(object_dict[date])
-        save_dict[year+'-'+month] = temp
-
-    for i in range(len(save_dict.keys())):
-
-        key = list(save_dict.keys())[i]
-        year = key[:4]
-        month = key[5:7]
-        if not os.path.isdir("Files/" + path + "/" + year):
-            os.makedirs("Files/" + path + "/" + year)
-        if not os.path.isdir("Files/" + path + "/" + year + "/" + month):
-            os.makedirs("Files/" + path + "/" + year + "/" + month)
-
-        dir_file = "Files/" + path + "/" + year + "/" + month + "/" + name
-
-        ### 파일이 이미 존재하느냐
-        if not overwrite:  # overwrite == False --> 덮어쓰지 않을 때
-            if not os.path.isfile(dir_file):
-                with open(dir_file, 'wb') as f:
-                    pickle.dump(save_dict[key], f)
-            elif i <= 1:
-                with open(dir_file, 'wb') as f:
-                    pickle.dump(save_dict[key], f)
-            else:  # 덮어쓰기 --> False 상태, 파일 있고 i >=2 --> 반복문 제외
+        for i in range(len(term_list)):
+            term_date = datetime.datetime(year=int(term_list[i][:4]), month=int(term_list[i][5:7]), day=28)
+            if input_date - term_date >= datetime.timedelta(0):
+                #print(term_date)
+                list_index = i
                 break
-        else:  # overwrite == True --> 덮어쓸 때
-            with open(dir_file, 'wb') as f:
-                pickle.dump(save_dict[key], f)
 
-    pass  # split_date 의 끝
+        if float(company_dict[keys][3][term_list[list_index]][10]) == -1:  # 데이터가 전부 -1일 경우 다음 분기 정보 사용
+            list_index += 1
+
+        if float(company_dict[keys][3][term_list[list_index]][10]) == -1:  # 2번째
+            print("{} 종목 Profit 로딩 Error".format(keys))    
+        
+        company_profit = 1 / float(company_dict[keys][3][term_list[list_index]][10])
+        company_profit_score = self.cal_cumulative_dist(company_profit, mean_company_profit, std_company_profit)
+        
+        company_property = 1 / float(company_dict[keys][3][term_list[list_index]][12])
+        company_property_score = self.cal_cumulative_dist(company_property, mean_company_property, std_company_property)
+        
+        company_debt = float(company_dict[keys][3][term_list[list_index]][6])
+        company_debt_score = self.cal_cumulative_dist(company_debt,mean_company_debt, std_company_debt)
+        
+        # 임시값(?) company_weight
+        term_list = list(company_dict[keys][1].keys())
+        term_list.sort(reverse=True)
+
+        for i in range(len(term_list)):
+            term_date = datetime.datetime(year=int(term_list[i][:4]), month=int(term_list[i][5:7]), day=int(term_list[i][8:]))
+            if input_date - term_date >= datetime.timedelta(0):
+                #print(term_date)
+                list_index = i
+                break
+        
+        company_weight =int(
+                        int(company_dict[keys][1][term_list[list_index]][1]) *
+                        int(company_dict[keys][0][3])
+                        /10000)
+        company_weight_score = self.cal_cumulative_dist(company_weight, mean_company_weight, std_company_weight)
+            
+        # (52 최고 - 최저) / 52최저 : price_variability_meanstd
+        company_variability = (int(company_dict[keys][0][8]) - int(company_dict[keys][0][9])) / int(company_dict[keys][0][9])
+        company_variability_score = self.cal_cumulative_dist(company_variability, mean_company_variability, std_company_variability)
+        
+        # 가격 * 거래량
+        company_tradevol = int(company_dict[keys][1][date][1]) * int(company_dict[keys][1][date][2])
+        company_tradevol_score = self.cal_cumulative_dist(company_tradevol, mean_company_tradevol, std_company_tradevol)
+        
+        # 5일, 20일 이평선
+        company_days5_score = self.company_days_moving(company_dict, keys, 5, year, month, day)
+        company_days20_score = self.company_days_moving(company_dict, keys, 20, year, month, day)
+        
+        # 회사 가격이 52주 최저 대비 몇배인가 : price_multi
+        company_multi_score = self.company_price_multi(company_dict, keys, year, month, day)
+        
+        # 코스피 / 코스닥 여부
+        company_kospi_kosdaq = 1 if company_dict[keys][0][20] == 'kospi' else 0
+        
+        output = [
+            company_marketbeta_score,
+            company_weight_score,
+            company_profit_score,
+            company_property_score,
+            company_debt_score,
+            company_multi_score,
+            company_variability_score,
+            company_tradevol_score,
+            company_days5_score,
+            company_days20_score,
+            fear_greed_index[-1],
+            company_kospi_kosdaq
+        ]
+        return output
+        pass  # company_score의 끝
 
 
-def months_loading(object_dict, path, object_filename, n_month=15, company_tf=False):
+class DNN_Training(DNN):
 
-    date_list = []
-    date = dt.today()
+    def company_score(self, company_dict, fear_greed_index_dict, keys, year, month, day, mean_marketbeta, std_marketbeta, mean_company_profit,
+    std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
+    std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight):       
+    # keys = company_name
+    
+        # year, month, day로 만드는 date (str)
+        date = str(year) + '-' + str(month).zfill(2) + '-' + str(day).zfill(2)
+        input_date = datetime.datetime(year=year, month=month, day=day)
+        
+        fear_greed_index = fear_greed_index_dict[date]
+        
+        # 52주 베타
+        company_marketbeta = float(company_dict[keys][0][21])
+        company_marketbeta_score = self.cal_cumulative_dist(company_marketbeta, mean_marketbeta, std_marketbeta)
+        
+        # 1/per (profit) ~ company_debt까지.
+        # 해당 부분에서 사용할 
+        term_list = list(company_dict[keys][3].keys())
+        term_list.sort(reverse=True)
 
-    for i in range(n_month):
-        # for i in range(n_month):
-        date_list.append(str(date - relativedelta(months=i))[:7])
+        for i in range(len(term_list)):
+            term_date = datetime.datetime(year=int(term_list[i][:4]), month=int(term_list[i][5:7]), day=28)
+            if input_date - term_date >= datetime.timedelta(0):
+                #print(term_date)
+                list_index = i
+                break
 
-    for dates in date_list:
-        print("{} 가격 정보 로딩 중 ...".format(dates))
-        year = dates[:4]
-        month = dates[5:7]
-        dir = "Files/" + path + "/" + year + "/" + month + "/"
+        if float(company_dict[keys][3][term_list[list_index]][10]) == -1:  # 데이터가 전부 -1일 경우 다음 분기 정보 사용
+            list_index += 1
 
-        if company_tf:  # 회사 정보를 로딩하는 경우
+        if float(company_dict[keys][3][term_list[list_index]][10]) == -1:  # 2번째
+            print("{} 종목 Profit 로딩 Error".format(keys))    
+        
+        company_profit = 1 / float(company_dict[keys][3][term_list[list_index]][10])
+        company_profit_score = self.cal_cumulative_dist(company_profit, mean_company_profit, std_company_profit)
+        
+        company_property = 1 / float(company_dict[keys][3][term_list[list_index]][12])
+        company_property_score = self.cal_cumulative_dist(company_property, mean_company_property, std_company_property)
+        
+        company_debt = float(company_dict[keys][3][term_list[list_index]][6])
+        company_debt_score = self.cal_cumulative_dist(company_debt,mean_company_debt, std_company_debt)
+        
+        # 임시값(?) company_weight
+        term_list = list(company_dict[keys][1].keys())
+        term_list.sort(reverse=True)
+
+        for i in range(len(term_list)):
+            term_date = datetime.datetime(year=int(term_list[i][:4]), month=int(term_list[i][5:7]), day=int(term_list[i][8:]))
+            if input_date - term_date >= datetime.timedelta(0):
+                #print(term_date)
+                list_index = i
+                break
+        
+        company_weight =int(
+                        int(company_dict[keys][1][term_list[list_index]][1]) *
+                        int(company_dict[keys][0][3])
+                        /10000)
+        company_weight_score = self.cal_cumulative_dist(company_weight, mean_company_weight, std_company_weight)
+            
+        # (52 최고 - 최저) / 52최저 : price_variability_meanstd
+        company_variability = (int(company_dict[keys][0][8]) - int(company_dict[keys][0][9])) / int(company_dict[keys][0][9])
+        company_variability_score = self.cal_cumulative_dist(company_variability, mean_company_variability, std_company_variability)
+        
+        # 가격 * 거래량
+        company_tradevol = int(company_dict[keys][1][date][1]) * int(company_dict[keys][1][date][2])
+        company_tradevol_score = self.cal_cumulative_dist(company_tradevol, mean_company_tradevol, std_company_tradevol)
+        
+        # 5일, 20일 이평선
+        company_days5_score = self.company_days_moving(company_dict, keys, 5, year, month, day)
+        company_days20_score = self.company_days_moving(company_dict, keys, 20, year, month, day)
+        
+        # 회사 가격이 52주 최저 대비 몇배인가 : price_multi
+        company_multi_score = self.company_price_multi(company_dict, keys, year, month, day)
+        
+        # 코스피 / 코스닥 여부
+        company_kospi_kosdaq = 1 if company_dict[keys][0][20] == 'kospi' else 0
+        
+        output = [
+            company_marketbeta_score,
+            company_weight_score,
+            company_profit_score,
+            company_property_score,
+            company_debt_score,
+            company_multi_score,
+            company_variability_score,
+            company_tradevol_score,
+            company_days5_score,
+            company_days20_score,
+            fear_greed_index[-1],
+            company_kospi_kosdaq
+        ]
+        return output
+        pass  # company_score의 끝
+
+    def company_training_data(self, company_dict, fear_greed_index_dict, keys, mean_marketbeta, std_marketbeta, mean_company_profit,
+    std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
+    std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight):       
+    # keys = company_name
+
+        price_list = list(company_dict[keys][1].values())
+        answer_list = []
+
+        print("{} 종목 training data 추출 중".format(keys))
+        
+        for i in range(23, 261):
             try:
-                file_list = os.listdir(dir)
-                for files in file_list:
-                    name = files + "." if files == "JYP Ent" else files  # JYP 빌어먹을 얘들 회사이름 JYP Ent.임
-
-                    with open(dir + name, 'rb') as f:
-                        data = pickle.load(f)
-                    for each_data in data:
-                        object_dict[name][1][each_data[0]] = each_data
-
-            except FileNotFoundError:
-                print("{} - {} 항목 없음, 건너뜀".format(year, month))
-
-        else:
-            try:
-                file = dir + object_filename
-                with open(file, 'rb') as f:
-                    data = pickle.load(f)
-                if type(data[0]) == list or type(data[0]) == np.ndarray:
-                    for each_data in data:
-                        object_dict[each_data[0]] = each_data
-                else:  # kosis_dict의 경우
-                    object_dict[data[0]] = data
-            except FileNotFoundError:
-                print("{} - {} 항목 없음, 건너뜀".format(year, month))
-    # return object_dict
-    pass  # months_loading의 끝
+                date_search = datetime.datetime.strptime(price_list[i][0], '%Y-%m-%d')
+                year = date_search.year
+                month = str(date_search.month).zfill(2)
+                day = str(date_search.day).zfill(2)
 
 
-def loading_data():
-    # company 로딩
-    company_pickle = [None,None]
-    with open("Files/code_list", 'rb') as f:
-        company_pickle[0] = pickle.load(f)
-    with open("Files/company_info", 'rb') as f:
-        company_pickle[1] = pickle.load(f)
+                # 가격 정보 답안
+                #18, 19, 20, 21, 22일 뒤의 평균 가격을 리스트로 추가하기 위한 부분
+                price_output_list = []
+                for j in range(5):
+                    price_output_list.append(int(price_list[i-18-j][2]))
+                price_output_np = np.array(price_output_list)
+                avg_price_future = np.mean(price_output_np)
+                avg_price_fut_ratio = avg_price_future / int(price_list[i][2])
 
-    months_loading(company_pickle[1], "Stock_Price", "", company_tf=True)
+                if avg_price_fut_ratio >= 1.05:
+                    answer = 0
+                elif avg_price_fut_ratio < 1.05 and avg_price_fut_ratio >= 1.005:
+                    answer = 1
+                elif avg_price_fut_ratio < 1.005 and avg_price_fut_ratio >= 0.995:
+                    answer = 2
+                elif avg_price_fut_ratio < 0.995 and avg_price_fut_ratio >= 0.95:
+                    answer = 3
+                elif avg_price_fut_ratio < 0.95:
+                    answer = 4
 
-    # KOSPI, KOSDAQ, bond, vkospi, kosis 로딩
-    try:
-        KOSPI_dict = {}
-        months_loading(KOSPI_dict, "Market", "KOSPI")
-    except FileNotFoundError:
-        KOSPI_dict = {}
-    try:
-        KOSDAQ_dict = {}
-        months_loading(KOSDAQ_dict, "Market", "KOSDAQ")
-    except FileNotFoundError:
-        KOSDAQ_dict = {}
-    try:
-        bond_dict = {'3m' : {}, '6m' : {}, '9m' : {}, '1y' : {}, '1y6m' : {}, '2y' : {}, '3y' : {}, '5y' : {}}
-        for key in bond_dict.keys():
-            months_loading(bond_dict[key], "Market", "bond_"+key)
-    except FileNotFoundError:
-        bond_dict = {'3m' : {}, '6m' : {}, '9m' : {}, '1y' : {}, '1y6m' : {}, '2y' : {}, '3y' : {}, '5y' : {}}
-    try:
-        vkospi_dict = {}
-        months_loading(vkospi_dict, "Market", "vkospi")
-    except FileNotFoundError:
-        vkospi_dict = {}
-    try:
-        kosis_dict = {}
-        months_loading(kosis_dict, "Market", "kosis")
-    except FileNotFoundError:
-        kosis_dict = {}
+                output = self.company_score(company_dict, fear_greed_index_dict, keys, year, int(month), int(day), mean_marketbeta, std_marketbeta, mean_company_profit,
+                                        std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
+                                        std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight)
+                output.append(answer)
+                answer_list.append(output)
 
-    return company_pickle, KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict
+            except Exception as e:
+                # print(e, date_search, keys)
+                pass
+                
+        return answer_list
+        pass  # company_score의 끝
+
+    def entire_dnn_training_data(self, company_dict, fear_greed_index_dict, mean_marketbeta, std_marketbeta, mean_company_profit,
+    std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
+    std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight):
+        
+        test_list = []
+        for keys in company_dict.keys():
+            if keys != "종목명":
+                test_list.append(self.company_training_data(company_dict, fear_greed_index_dict, keys, mean_marketbeta, std_marketbeta, mean_company_profit,
+                                std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
+                                std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight))
+        return test_list
+        pass  # entire_dnn_training_data 의 끝
+
 
 
 if __name__=="__main__":
 
-    pass
+    loading_cls = loading()
+    company_pickle, KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict = loading_cls.loading_data(n_month=15)
+
+    fgi = FGI()
+    fgi_dict = fgi.fear_greed_index(KOSPI_dict, KOSDAQ_dict, bond_dict['2y'], vkospi_dict)
+
+    date = list(fgi_dict.keys())[0]
+    year = int(date[:4])
+    month = int(date[5:7])
+    day = int(date[8:])
+
+    if not os.path.isfile('Files\\DNN\\Entire\\'+date):
+
+        dnn = DNN()
+        company_dict = company_pickle[1]
+        market_meanstd = dnn.entire_market_meanstd(kosis_dict, company_dict, year, month, day)
+
+        # 모델 로딩 후 평가 필요
+
+        model = keras.Sequential([
+            keras.layers.InputLayer(input_shape=(12,), name = 'Input'),
+            keras.layers.Dense(100, activation='relu', name='Dense_1'),
+            keras.layers.Dense(5, activation='softmax', name='predictions')])
+
+        model.compile(optimizer=keras.optimizers.Adam(learning_rate=0.001, beta_1=0.9, beta_2=0.999),
+                      loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+        model.load_weights('price_predict_dnn_weight')
+        print("keras 모듈 임포트, 모델 로딩")
+
+        time.sleep(3)
+
+        entire_dict = {}
+        recommand_dict = {}
+
+        for keys in company_dict.keys():
+            print(keys + " 종목 가격 예측")
+            try:
+                if keys != "종목명":
+                    test_list = dnn.company_score(company_dict, fgi_dict, keys, year, month, day, *market_meanstd)
+                    test_list = np.array(test_list).reshape(-1, 12)
+                    prediction = model.predict(test_list)
+
+                    print(keys, prediction)
+                    entire_dict[keys] = prediction
+                    if prediction.argmax() == 0 and prediction[0][1] >= prediction[0][2] \
+                            and prediction[0][1] >= prediction[0][3] and prediction[0][1] > prediction[0][4]:
+                        recommand_dict[keys] = prediction
+
+            except:
+                print(keys + " 종목 가격 예측 실패")
+                pass
+
+        recommand_list = list(recommand_dict.keys())
+
+        with open('Files\\DNN\\Entire\\'+date, 'wb') as f:
+            pickle.dump(entire_dict, f)
+
+        with open('Files\\DNN\\Recommand\\'+date, 'wb') as f:
+            pickle.dump(recommand_dict, f)
+
+        # 서버로 파일 옮기기
+        try:
+            os.makedirs("..\\Stock_Server_v2\\Files\\AI\\" + date)
+        except FileExistsError:
+            pass
+
+        with open("..\\Stock_Server_v2\\Files\\AI\\" + date + "\\list", 'wb') as f:
+            pickle.dump(recommand_list, f)
+        with open("..\\Stock_Server_v2\\Files\\AI\\" + date + "\\score", 'wb') as f:
+            pickle.dump(recommand_dict, f)
+        # filelist.json 수정하기
+        with open("..\\Stock_Server_v2\\Files\\filelist.json", 'r') as f:
+            json_filelist = json.load(f)
+        json_filelist['AI'] = [date] + json_filelist['AI'][:-1]
+        with open("..\\Stock_Server_v2\\Files\\filelist.json", 'w') as f:
+            json.dump(json_filelist, f)
+
+        company_pickle, KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict = loading_cls.loading_data(n_month=5)
+        company_dict = company_pickle[1]
+
+        for keys in company_dict.keys():
+            temp_dict = {}
+            temp_dict[keys] = company_dict[keys]
+            with open("..\\Stock_Server_v2\\Files\\Stocks\\" + keys, 'wb') as f:
+                pickle.dump(temp_dict, f)
+
+    else:
+        print(date + " 날짜 추천목록 있음. 분석 종료.")
+
+    '''
+    # 다음은 모델 훈련 코드
+    dnn_training = DNN_Training()
+    test_list = dnn_training.entire_dnn_training_data(company_dict, fgi_dict, *market_meanstd)
+
+    random.shuffle(test_list)
+    entire_training_np = np.array(test_list)
+    entire_training_pd = pd.DataFrame(entire_training_np)
+    entire_training_pd.to_csv("training_data_2.csv", index=False)    
+    
+    entire_training_pd = pd.read_csv("training_data_2.csv")
+    entire_training_np = np.array(entire_training_pd)
+    entire_training_list = entire_training_np.tolist()
+    
+    # 
+    # for i in range(len(entire_training_list)):
+    #     temp.append(ast.literal_eval(entire_training_list[i][0]))
+    # 
+    # test_list = []
+    # for i in range(len(temp)):
+    #     if temp[i] != []:
+    #         for j in range(len(temp[i])):
+    #             test_list.append(temp[i][j])      
+    
+    training_data = entire_training_np[:-30000, :12]
+    training_label = entire_training_np[:-30000, -1]
+    test_data = entire_training_np[-30000:, :12]
+    test_label = entire_training_np[-30000:, -1]
+    
+    with tf.device('/device:GPU:0'):
+        model = keras.Sequential([
+            keras.layers.InputLayer(input_shape=(12,), name = 'Input'),
+            keras.layers.Dense(100, activation = 'relu', name = 'Dense_1'),
+            keras.layers.Dense(5, activation = 'softmax', name = 'predictions')])
+            
+        model.compile(optimizer = keras.optimizers.Adam(lr = 0.001, beta_1 = 0.9, beta_2 = 0.999), loss = 'sparse_categorical_crossentropy', metrics = ['accuracy'])
+        
+        model.fit(training_data, training_label, batch_size = 1024, epochs=12800)
+        model.fit(training_data, training_label, batch_size = 512, epochs=3200)
+        
+    model.evaluate(test_data, test_label, verbose = 2)
+    
+    model.save('price_predict_dnn.h5')
+    model.save_weights('price_predict_dnn_weight')   
+     
+    model = keras.models.load_model('price_predict_dnn.h5')
+    '''

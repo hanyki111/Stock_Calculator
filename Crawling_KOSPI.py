@@ -70,8 +70,9 @@ def split_date(object_dict, path, name, overwrite=False):
         save_dict[year+'-'+month] = temp
 
     for i in range(len(save_dict.keys())):
-
-        key = list(save_dict.keys())[i]
+        sorted_date = list(save_dict.keys())
+        sorted_date.sort(reverse=True)
+        key = sorted_date[i]
         year = key[:4]
         month = key[5:7]
         if not os.path.isdir("Files/" + path + "/" + year):
@@ -1079,6 +1080,7 @@ def KOSPI_KOSDAQ_calculate(company_price_dict, KOSPI_data_dict, KOSDAQ_data_dict
 if __name__ == '__main__':
 
     # company 로딩
+    start_time = datetime.datetime.now()
     print("START TIME : {}".format(str(datetime.datetime.now())))
     company_pickle = [None,None]
     with open("Files/code_list", 'rb') as f:
@@ -1167,6 +1169,7 @@ if __name__ == '__main__':
         split_date(bond_dict[keys], "Market", "bond_"+keys, overwrite=overwrite_tf)
 
     print("모든 크롤링 및 저장 작업 완료")
+    print("START TIME : {}".format(str(start_time)))
     print("END TIME : {}".format(str(datetime.datetime.now())))
 
 '''
