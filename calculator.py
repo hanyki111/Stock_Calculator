@@ -1,7 +1,9 @@
 # import ast
+import asyncssh
 import json
 import numpy as np
 import pandas as pd
+import paramiko
 import pickle
 import random
 import time
@@ -93,7 +95,7 @@ class loading:
             date_list.append(str(date - relativedelta(months=i))[:7])
 
         for dates in date_list:
-            print("{} 가격 정보 로딩 중 ...".format(dates))
+            # print("{} 가격 정보 로딩 중 ...".format(dates))
             year = dates[:4]
             month = dates[5:7]
             dir = "Files/" + path + "/" + year + "/" + month + "/"
@@ -232,7 +234,12 @@ class FGI:
     def average125_kospi_estrangement(self, KOSPI_dict):  # + 탐욕, - 공포
         # KOSPI_dict의 125일 이평선과 당일 값의 이격도를 계산
         # [날짜, 당일 코스피, ]
-        kospi_value = np.array(list(KOSPI_dict.values()))
+        kospi_value = np.array(sorted(list(KOSPI_dict.values())), dtype=object)[::-1]
+        while not len(kospi_value[0])==8:
+            kospi_value = kospi_value[1:]
+        for i in range(len(kospi_value)):
+            kospi_value[i] = np.array(kospi_value[i], dtype=object)
+        print(kospi_value[0])
         average125 = pd.DataFrame(kospi_value[:, 1].astype(float)).rolling(window=125).mean().dropna().to_numpy().reshape(-1)
         
         estrangement_average125_kospi_list = []
@@ -1051,8 +1058,25 @@ class DNN_Training(DNN):
         return test_list
         pass  # entire_dnn_training_data 의 끝
 
+'''
+class server_related():
 
+    async def send_file(self, file, remote_path, host, port, username, password):
+        # file = 파일경로 및 이름
+        async with asyncssh.connect(host, port=port, username=username, password=password) as conn:
+            # 2. company_list_pickle file send
+            async with conn.start_sftp_client() as sftp:
+                # put(localpaths, remotepath=None, *, preserve=False, recurse=False, follow_symlinks=False, block_size=16384, max_requests=128, progress_handler=None, error_handler=None)
+                await sftp.put(file, remotepath=remote_path)
 
+            print("Host : {} Uploading Files : {}".format(host, file))
+
+    async def command_cmd(self, cmd, host, port, username, password):
+        async with asyncssh.connect(host, port=port, username=username, password=password) as conn:
+            result = await conn.run(cmd, check=True)
+            print(result.stdout, end='')
+            return result.stdout
+'''
 if __name__=="__main__":
 
     loading_cls = loading()
@@ -1066,7 +1090,9 @@ if __name__=="__main__":
     month = int(date[5:7])
     day = int(date[8:])
 
-    if not os.path.isfile('Files\\DNN\\Entire\\'+date):
+    print(date)
+
+    if not os.path.isfile('Files\\DNN\\Entire\\' + date):
 
         dnn = DNN()
         company_dict = company_pickle[1]
@@ -1115,31 +1141,76 @@ if __name__=="__main__":
         with open('Files\\DNN\\Recommand\\'+date, 'wb') as f:
             pickle.dump(recommand_dict, f)
 
-        # 서버로 파일 옮기기
+        with open('Files\\DNN\\Recommand_list\\'+date, 'wb') as f:
+            pickle.dump(recommand_list, f)
+
+        ### 서버로 파일 옮기기
+        print("서버 파일 업데이트 시작 ...")
+        server_dir = "/root/projects/Files/"
+        server_host = '192.168.0.8'
+        server_info = {'username': 'root', 'password': 'gksdlr77', 'port': 22}
+        # ssh
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy)
+        ssh.connect(server_host, **server_info)
+        # sftp
+        transport = paramiko.Transport((server_host, server_info['port']))
+        transport.connect(None, server_info['username'], server_info['password'])
+        sftp = paramiko.SFTPClient.from_transport(transport)
+
+        # 날짜 폴더 생성
+        stdin, stdout, stderr = ssh.exec_command("mkdir " + server_dir + "AI/" + date)
+        time.sleep(1)
+        print(stdout.readlines())
+        '''        
         try:
-            os.makedirs("..\\Stock_Server_v2\\Files\\AI\\" + date)
+            stdin, stdout, stderr = ssh.exec_command("mkdir " + server_dir + "AI/" + date)
+            print(stdout.readlines())
+            # server.command_cmd("mkdir " + server_dir + "AI/" + date, **server_info)
+            # os.makedirs(server_dir + "AI/" + date)
         except FileExistsError:
             pass
+        '''
 
-        with open("..\\Stock_Server_v2\\Files\\AI\\" + date + "\\list", 'wb') as f:
+        # 지정된 경로에 recommand_list, recommand_dict 파일을 put 한다
+        # recommand_dict 파일경로: 'Files\\DNN\\Recommand\\'+date
+        # recommand_list 파일경로: 'Files\\DNN\\Recommand_list\\'+date
+        sftp.put('Files\\DNN\\Recommand\\'+date, server_dir + "AI/" + date + "/score")
+        sftp.put('Files\\DNN\\Recommand_list\\'+date, server_dir + "AI/" + date + "/list")
+
+        # 이하 기존 windows 산하 서버 폴더에 저장했던 코드
+        ''' 
+        with open(server_dir + "AI/" + date + "/list", 'wb') as f:
             pickle.dump(recommand_list, f)
-        with open("..\\Stock_Server_v2\\Files\\AI\\" + date + "\\score", 'wb') as f:
+        with open(server_dir + "AI/" + date + "/score", 'wb') as f:
             pickle.dump(recommand_dict, f)
-        # filelist.json 수정하기
-        with open("..\\Stock_Server_v2\\Files\\filelist.json", 'r') as f:
+        '''
+        ### filelist.json 수정하기
+
+        # filelist.json을 get 한다
+        sftp.get(server_dir + "filelist.json", "filelist.json")
+        # get한 filelist.json을 수정한다
+        with open("filelist.json", 'r') as f:
             json_filelist = json.load(f)
         json_filelist['AI'] = [date] + json_filelist['AI'][:-1]
-        with open("..\\Stock_Server_v2\\Files\\filelist.json", 'w') as f:
+        with open("filelist.json", 'w') as f:
             json.dump(json_filelist, f)
+        # 수정한 filelist.json을 서버에 put 한다
+        sftp.put("filelist.json", server_dir + "filelist.json")
+        # 현재 폴더의 filelist.json을 삭제한다
+        os.remove("filelist.json")
 
         company_pickle, KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict = loading_cls.loading_data(n_month=5)
         company_dict = company_pickle[1]
 
+        # 개별 회사 데이터를 로컬 Files/Stocks/에 저장한다
+        # 저장한 파일을 서버에 put한다
         for keys in company_dict.keys():
             temp_dict = {}
             temp_dict[keys] = company_dict[keys]
-            with open("..\\Stock_Server_v2\\Files\\Stocks\\" + keys, 'wb') as f:
+            with open("Files/Stocks/" + keys, 'wb') as f:
                 pickle.dump(temp_dict, f)
+            sftp.put("Files/Stocks/" + keys, server_dir + "/Stocks/" + keys)
 
     else:
         print(date + " 날짜 추천목록 있음. 분석 종료.")
@@ -1190,4 +1261,10 @@ if __name__=="__main__":
     model.save_weights('price_predict_dnn_weight')   
      
     model = keras.models.load_model('price_predict_dnn.h5')
+    '''
+
+
+    '''
+    
+    
     '''

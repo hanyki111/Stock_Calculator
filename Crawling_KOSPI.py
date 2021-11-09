@@ -25,7 +25,9 @@ from bs4 import BeautifulSoup
 
 
 def company_list():
+
     company_code_List = []
+    # 한국거래소 - 주식 - 상장현황 - 상장회사검색
     with open('Company_Code.csv', 'r', encoding='UTF-8') as codefile:
         csvCode = csv.reader(codefile)
         for row in csvCode:
@@ -109,7 +111,7 @@ def months_loading(object_dict, path, object_filename, n_month=15, company_tf=Fa
         date_list.append(str(date - relativedelta(months=i))[:7])
 
     for dates in date_list:
-        print("{} 가격 정보 로딩 중 ...".format(dates))
+        # print("{} 가격 정보 로딩 중 ...".format(dates))
         year = dates[:4]
         month = dates[5:7]
         dir = "Files/" + path + "/" + year + "/" + month + "/"
@@ -701,7 +703,7 @@ def kosis_crawling(kosis_dict):  # 경기동반지수 등 통계청 관련 크�
                 date -= delta
                 yearmonth = str(date.year) + str(date.month).zfill(2)
 
-        except TypeError:  # 현재 연월 Error
+        except (TypeError, KeyError):  # 현재 연월 Error
             date -= delta
             yearmonth = str(date.year) + str(date.month).zfill(2)
 
@@ -764,7 +766,7 @@ async def dispersion_crawling_data(company_list, company_dict, update=None, limi
     loop = asyncio.get_event_loop()
     tasks = []
     for i in range(len(machines)):
-        tasks.append(loop.create_task(getfiles_machiens(**active_machines_dict[machines[i]])))
+        tasks.append(loop.create_task(getfiles_machines(**active_machines_dict[machines[i]])))
 
     for task in tasks:
         print(task)
@@ -805,7 +807,8 @@ async def command_machines(crawling_kospi_dispersion_file, host, port, username,
         print("Host : {} Command Crawling".format(host))
         await conn.run('python Crawling_KOSPI_Dispersion.py ' + str(update) + ' ' + str(limits), check=True)
 
-async def getfiles_machiens(host, port, username, password):
+
+async def getfiles_machines(host, port, username, password):
     async with asyncssh.connect(host, port=port, username=username, password=password) as conn:
         print("Host : {} Get Files".format(host))
         file_text = await conn.run("ls -a", check=True)
@@ -1046,32 +1049,36 @@ def KOSPI_KOSDAQ_calculate(company_price_dict, KOSPI_data_dict, KOSDAQ_data_dict
                     print(e)
 
             for dates in price_data_dict.keys():
-                if market_type == 'kospi':
-                    dict_num = 0
-                else:
-                    dict_num = 1
-
-                data_dict = dict_list[dict_num]
-
-                if len(data_dict[dates]) < 8: # high/low, trdvol +, - 가 추가되지 않은 경우
-                    for i in range(8 - len(data_dict[dates])):
-                        data_dict[dates].append(0)
-
-                if force_update or \
-                    data_dict[dates][4] == 0 or data_dict[dates][5] == 0:  # high/low 추가 안 됨
-                    if price_data_dict[dates][8] == 'high':
-                        data_dict[dates][4] += 1
-                    elif price_data_dict[dates][8] == 'low':
-                        data_dict[dates][5] += 1
-
-                if force_update or \
-                    data_dict[dates][6] == 0 or data_dict[dates][7] == 0:
-                    if price_data_dict[dates][9] >= 0:
-                        data_dict[dates][6] += price_data_dict[dates][9]
+                try:
+                    if market_type == 'kospi':
+                        dict_num = 0
                     else:
-                        data_dict[dates][7] += price_data_dict[dates][9]
+                        dict_num = 1
 
-                print(data_dict[dates], dict_num)
+                    data_dict = dict_list[dict_num]
+
+                    if len(data_dict[dates]) < 8: # high/low, trdvol +, - 가 추가되지 않은 경우
+                        for i in range(8 - len(data_dict[dates])):
+                            data_dict[dates].append(0)
+
+                    if force_update or \
+                        data_dict[dates][4] == 0 or data_dict[dates][5] == 0:  # high/low 추가 안 됨
+                        if price_data_dict[dates][8] == 'high':
+                            data_dict[dates][4] += 1
+                        elif price_data_dict[dates][8] == 'low':
+                            data_dict[dates][5] += 1
+
+                    if force_update or \
+                        data_dict[dates][6] == 0 or data_dict[dates][7] == 0:
+                        if price_data_dict[dates][9] >= 0:
+                            data_dict[dates][6] += price_data_dict[dates][9]
+                        else:
+                            data_dict[dates][7] += price_data_dict[dates][9]
+
+                    print(data_dict[dates], dict_num)
+                except (IndexError, KeyError):
+                    print("{} 날짜 오류".format(dates))
+                    pass
 
     return KOSPI_data_dict, KOSDAQ_data_dict, company_price_dict
     pass  # KOSPI_KOSDAQ_calculate 의 끝
