@@ -538,6 +538,7 @@ async def price_crawling_async(company_code, company_name, price_data_dict, upda
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.113 Safari/537.36'}
         page_num = 1
         page_num_switch = False
+        last_crawling_date = ''
 
         while page_num_switch == False:
 
@@ -548,7 +549,8 @@ async def price_crawling_async(company_code, company_name, price_data_dict, upda
             items = [item.get_text().strip('\n').strip('\t').split()
                      for item in soup.select("div.section table tr")]
             end_num = len(items)
-            if items != []:
+
+            if items != []:  # 빈 라인 삭제
                 for i in range(2):
                     for j in range(0, end_num):
                         try:
@@ -556,6 +558,7 @@ async def price_crawling_async(company_code, company_name, price_data_dict, upda
                                 del items[j]
                         except IndexError:
                             break;
+
 
             for i in range(9, len(items) - 1):  # 9번 ~ 29번
                 if items[i] != []:  # 데이터 카공 : 컴마 제외 등
@@ -580,6 +583,9 @@ async def price_crawling_async(company_code, company_name, price_data_dict, upda
 
                     items[i] = temp_list[:]
 
+                    if items[i][0] == last_crawling_date:
+                        page_num_switch = True
+                        break
 
                     if items[i][0] not in price_data_dict.keys() or update:
                         price_data_dict[items[i][0]] = items[i]
@@ -590,49 +596,55 @@ async def price_crawling_async(company_code, company_name, price_data_dict, upda
                 else:  # items[i] == [] :
                     page_num_switch = True
                     break;
+
+            if items[9] != []:
+                last_crawling_date = items[9][0].replace('.', '-')
+            else:
+                page_num_switch = True
+                break;
             page_num += 1
 
         # Cal_52HighLow, TradingVol
         # TradingVol : 거래량. 전날 대비 가격이 올랐으면 +, 내렸으면 -
-        try:  # Cal_52HighLow, TradingVol 계산을 여기서 처리
-            price_data_values = np.array(list(price_data_dict.values()))
-            for i in range(len(price_data_values)):
-                if price_data_values[i][8] == 0 or price_data_values[i][8] == '0' or update == True:
-                    try:
-                        if np.min(np.array(price_data_values[i: i + 260][:, 2], dtype=int)) == int(price_data_values[i][2]):  # 52주 최소가 해당 값
-                            price_data_values[i][8] = 'low'
-                        elif np.max(np.array(price_data_values[i: i + 260][:, 2], dtype=int)) == int(price_data_values[i][2]):  # 52주 최대가 해당 값
-                            price_data_values[i][8] = 'high'
-                        else:
-                            price_data_values[i][8] = '1'
-                    except IndexError:
-                        price_data_values[i][8] = '1'
-                else:  # 이 이후의 값들은 이미 계산되어 있음. update==false임
-                    break
+        # try:  # Cal_52HighLow, TradingVol 계산을 여기서 처리
+        #     price_data_values = np.array(list(price_data_dict.values()))
+        #     for i in range(len(price_data_values)):
+        #         if price_data_values[i][8] == 0 or price_data_values[i][8] == '0' or update == True:
+        #             try:
+        #                 if np.min(np.array(price_data_values[i: i + 260][:, 2], dtype=int)) == int(price_data_values[i][2]):  # 52주 최소가 해당 값
+        #                     price_data_values[i][8] = 'low'
+        #                 elif np.max(np.array(price_data_values[i: i + 260][:, 2], dtype=int)) == int(price_data_values[i][2]):  # 52주 최대가 해당 값
+        #                     price_data_values[i][8] = 'high'
+        #                 else:
+        #                     price_data_values[i][8] = '1'
+        #             except IndexError:
+        #                 price_data_values[i][8] = '1'
+        #         else:  # 이 이후의 값들은 이미 계산되어 있음. update==false임
+        #             break
+        #
+        #         if price_data_values[i][9] == 0 or price_data_values[i][9] =='0' or update == True:
+        #             try:
+        #                 if int(price_data_values[i][2]) >= int(price_data_values[i + 1][2]):
+        #                     price_data_values[i][9] = int(price_data_values[i][2])
+        #                 else:
+        #                     price_data_values[i][9] = -1 * int(price_data_values[i][2])
+        #             except IndexError:
+        #                 price_data_values[i][9] = 0
+        #         else:  # 이 이후의 값들은 이미 계산되어 있음. update==false임
+        #             break
 
-                if price_data_values[i][9] == 0 or price_data_values[i][9] =='0' or update == True:
-                    try:
-                        if int(price_data_values[i][2]) >= int(price_data_values[i + 1][2]):
-                            price_data_values[i][9] = int(price_data_values[i][2])
-                        else:
-                            price_data_values[i][9] = -1 * int(price_data_values[i][2])
-                    except IndexError:
-                        price_data_values[i][9] = 0
-                else:  # 이 이후의 값들은 이미 계산되어 있음. update==false임
-                    break
-
-        except Exception as e:
-            print("{} 종목 52 최고 - 최저, 거래량 계산 오류")
-            print(e)
-            pass
+        # except Exception as e:
+        #     print("{} 종목 52 최고 - 최저, 거래량 계산 오류")
+        #     print(e)
+        #     pass
 
         # calculated data update
-        for i in range(len(price_data_values)):
-            date = price_data_values[i][0]
-            if not update:
-                if not np.any(price_data_dict[date] == price_data_values[i]) == False:
-                    break
-            price_data_dict[date] = price_data_values
+        # for i in range(len(price_data_values)):
+        #     date = price_data_values[i][0]
+        #     if not update:
+        #         if not np.any(price_data_dict[date] == price_data_values[i]) == False:
+        #             break
+        #     price_data_dict[price_data_values[i][0]] = price_data_values[i]
 
     return price_data_dict
 
@@ -717,12 +729,15 @@ async def financial_crawling_async(company_code, company_name, financial_data_ye
     return financial_data_year_dict, financial_data_quarter_dict
 
 
-async def company_crawling_async(company_list, company_dict, update=False, limits=10):
+async def company_crawling_async(company_list, company_dict, filename, start_num=0, update=False, limits=10):
 
     loop = asyncio.get_event_loop()
 
-    for companies in company_list:
+    # for companies in company_list:
 
+    for i in range(start_num, len(company_list)):
+
+        companies = company_list[i]
         company_code = companies[0]
         company_name = companies[1]
 
@@ -748,6 +763,14 @@ async def company_crawling_async(company_list, company_dict, update=False, limit
         company_dict[company_name][0] = await info_crawl
         company_dict[company_name][1] = await price_crawl
         company_dict[company_name][2], company_dict[company_name][3] = await financial_crawl
+
+        # 중간중간 세이브
+        company_pickle = [company_list, company_dict]
+        with open(filename, 'wb') as f:
+            pickle.dump(company_pickle, f)
+
+        with open("temporarily_save.txt", 'w') as f:
+            f.write(str(i))
 
     return company_dict
 
@@ -789,10 +812,37 @@ if __name__ == '__main__':
     except Exception:
         limits = 5
 
+    # pc에서의 크롤링용
+    # update = True
+
+    # 중간 세이브
+
+    start_time = datetime.datetime.now()
+
+    try:
+        with open("temporarily_save.txt", 'r') as f:
+            start_num = int(f.read())
+    except Exception as e:
+        print(e)
+        start_num = 0
+
+    filename = glob('company_divided_*')[0]  # 한 개만 나오도록 할 것
     company_list, company_dict = pickle_load()    
-    company_dict = asyncio.run(company_crawling_async(company_list, company_dict, update=update, limits=limits))
+    company_dict = asyncio.run(company_crawling_async(company_list, company_dict, filename, start_num=start_num, update=update, limits=limits))
 
     company_pickle = [company_list, company_dict]
-    filename = glob('company_divided_*')[0]  # 한 개만 나오도록 할 것
+    with open("company_pickle", 'wb') as f:
+        pickle.dump(company_pickle, f)
     with open(filename, 'wb') as f:
         pickle.dump(company_pickle, f)
+
+    end_time = datetime.datetime.now()
+
+    # 중간 세이브 초기화
+    with open("time_record.txt", 'w') as g:
+        g.write("Start Time : " + str(start_time) + ", End Time : " + str(end_time))
+    with open("temporarily_save.txt", 'w') as f:
+        f.write("0")
+
+    print("완료")
+

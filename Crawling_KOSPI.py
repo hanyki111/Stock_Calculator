@@ -6,6 +6,7 @@ import csv
 import datetime
 import json
 import os
+import random
 import time
 
 from datetime import datetime as dt
@@ -15,6 +16,7 @@ from io import BytesIO
 import aiohttp
 import asyncio
 import asyncssh
+import paramiko
 import numpy as np
 import pandas as pd
 import pickle
@@ -119,9 +121,10 @@ def months_loading(object_dict, path, object_filename, n_month=15, company_tf=Fa
         if company_tf:  # 회사 정보를 로딩하는 경우
             try:
                 file_list = os.listdir(dir)
+                print("Company info : {} loading".format(year+"-"+month))
                 for files in file_list:
+                    # print(files)
                     name = files + "." if files == "JYP Ent" else files  # JYP 빌어먹을 얘들 회사이름 JYP Ent.임
-
                     with open(dir + name, 'rb') as f:
                         data = pickle.load(f)
                     for each_data in data:
@@ -129,9 +132,11 @@ def months_loading(object_dict, path, object_filename, n_month=15, company_tf=Fa
 
             except FileNotFoundError:
                 print("{} - {} 항목 없음, 건너뜀".format(year, month))
+                pass
 
         else:
             try:
+                print("{} loading".format(object_filename))
                 file = dir + object_filename
                 with open(file, 'rb') as f:
                     data = pickle.load(f)
@@ -164,7 +169,22 @@ async def async_get(url, headers, limits=10):
 
 
 async def info_crawling_async(company_code, company_name, limits=10):
-    
+
+    # 0 : 코드
+    # 1 : 이름
+    # 2 : 가격
+    # 3 : (상장 주식 수)
+    # 4 : PER
+    # 5 : EPS
+    # 6 : PBR
+    # 7 : BPS
+    # 8 : 52max
+    # 9 : 52min
+    # 10 ~ 19 : 당기순이익
+    # 20 : 코스피, 코스닥
+    # 21 : 52Beta
+    # 22 : 업데이트 날짜
+
     info_list = ["" for i in range(23)]
     info_list[0] = company_code
     info_list[1] = company_name
@@ -182,7 +202,7 @@ async def info_crawling_async(company_code, company_name, limits=10):
         info_list[2] = [item.get_text().strip() for item in soup.select \
             ("div.rate_info div.today span.blind")][0].replace(",", "")  # 가격 정보
         info_list[3] = [item.get_text().strip() for item in soup.select("div.first tr td")] \
-            [2].replace(",", "").replace("\n", "").replace("1", "")
+            [2].replace(",", "").replace("\n", "")
 
         if info_list[2] == "" or info_list[2].isdecimal() == False:
             info_list[2] = None
@@ -387,6 +407,8 @@ async def price_crawling_async(company_code, company_name, price_data_dict, upda
         # TradingVol : 거래량. 전날 대비 가격이 올랐으면 +, 내렸으면 -
         try:  # Cal_52HighLow, TradingVol 계산을 여기서 처리
             price_data_values = np.array(list(price_data_dict.values()))
+
+
             for i in range(len(price_data_values)):
                 if price_data_values[i][8] == 0 or price_data_values[i][8] == '0' or update == True:
                     try:
@@ -508,12 +530,15 @@ async def financial_crawling_async(company_code, company_name, financial_data_ye
     return financial_data_year_dict, financial_data_quarter_dict
 
 
-async def company_crawling_async(company_list, company_dict, update=False, limits=10):
+async def company_crawling_async(company_list, company_dict, filename, start_num=0, update=False, limits=10):
 
     loop = asyncio.get_event_loop()
 
-    for companies in company_list:
-        
+    # for companies in company_list:
+
+    for i in range(start_num, len(company_list)):
+
+        companies = company_list[i]
         company_code = companies[0]
         company_name = companies[1]
 
@@ -524,7 +549,7 @@ async def company_crawling_async(company_list, company_dict, update=False, limit
             price_dict = company_dict[company_name][1]
         except Exception:
             price_dict = {}
-        
+
         try:
             financial_year_dict = company_dict[company_name][2]
             financial_quarter_dict = company_dict[company_name][3]
@@ -533,15 +558,28 @@ async def company_crawling_async(company_list, company_dict, update=False, limit
             financial_quarter_dict = {}
 
         info_crawl = loop.create_task(info_crawling_async(company_code, company_name, limits=limits))
+        time.sleep(random.random())
         price_crawl = loop.create_task(price_crawling_async(company_code, company_name, price_dict, update=update, limits=limits))
+        time.sleep(random.random())
         financial_crawl = loop.create_task(financial_crawling_async(company_code, company_name, financial_year_dict, financial_quarter_dict, limits=limits))
+        time.sleep(random.random())
 
         company_dict[company_name][0] = await info_crawl
         company_dict[company_name][1] = await price_crawl
         company_dict[company_name][2], company_dict[company_name][3] = await financial_crawl
 
-    return company_dict
+        # 중간중간 세이브
+        # company_pickle = [company_list, company_dict]
+        # with open(filename, 'wb') as f:
+        #     pickle.dump(company_pickle, f)
+        #
+        # with open("temporarily_save.txt", 'w') as f:
+        #     f.write(str(i))
 
+
+        time.sleep(random.random())
+
+    return company_dict
 # price_crawling 과 거의 같은 코드를 통해 크롤링
 # kospi, kosdaq 코드를 하나로 합치고 이름을 market으로 변경
 # kospi highlow, kosdaq highlow, tradingvol_plusminus를 함께 처리. 
@@ -595,6 +633,9 @@ def bond_crawling(bond_dict, time_sleep = 1):
 
         finally:
             date -= datetime.timedelta(days=1)
+            if int(date.year) < 2002:
+                date_loop_switch = False
+                break
             date_ymd = str(date.year) + '.' + str(date.month).zfill(2) + '.' + str(date.day).zfill(2)
 
         time.sleep(time_sleep)
@@ -729,6 +770,8 @@ async def dispersion_crawling_data(company_list, company_dict, update=None, limi
     company_number_divided_len = round(len(company_list) / len(machines))
     company_divided_list = [0 for items in machines]
 
+
+
     # 리스트를 쪼개서 피클로 저장     
     # 각 machines가 행할 행동을 tasks에 지정
 
@@ -750,14 +793,17 @@ async def dispersion_crawling_data(company_list, company_dict, update=None, limi
                 pass
         company_divided_pickle = [company_divided_list[i], company_divided_dict]
 
-        with open("company_divided_pickle_" + str(i), 'wb') as f:
+        with open("company_divided_pickle_" + str(i) +".pkl", 'wb') as f:
             pickle.dump(company_divided_pickle, f)
-
-        tasks.append(command_machines("company_divided_pickle_" + str(i), **active_machines_dict[machines[i]], update=update, limits=limits))
+        if machines[i] == 'desktop':
+            tasks.append(command_machines("company_divided_pickle_" + str(i) +".pkl", **active_machines_dict[machines[i]], update=update, limits=2))
+        else:
+            tasks.append(command_machines("company_divided_pickle_" + str(i) +".pkl", **active_machines_dict[machines[i]], update=update, limits=limits))
 
     # 각 machines가 행동을 하도록 명령 (=크롤링)
     # for task in tasks:
     #     asyncio.gather(task)
+    print(tasks)
     await asyncio.gather(*tasks)
 
     print("각 머신들에게 크롤링 명령 완료")
@@ -772,8 +818,12 @@ async def dispersion_crawling_data(company_list, company_dict, update=None, limi
         print(task)
         await task
 
+    #  각 machines 에서 파일 제거
+    # dispersion.py 파일은 재전송되면서 덮어쓰기 됨
+    # company_divided_pickle_0.pkl 파일은 getfile_machine에서 삭제처리함
+
     print("각 머신들에게 크롤링 파일 받기기 완료")
-   # 전송받은 파일들을 하나로 합침
+    # 전송받은 파일들을 하나로 합침
 
     file_list = os.listdir(os.getcwd())
     company_list = list()
@@ -808,18 +858,47 @@ async def command_machines(crawling_kospi_dispersion_file, host, port, username,
         await conn.run('python Crawling_KOSPI_Dispersion.py ' + str(update) + ' ' + str(limits), check=True)
 
 
-async def getfiles_machines(host, port, username, password):
-    async with asyncssh.connect(host, port=port, username=username, password=password) as conn:
-        print("Host : {} Get Files".format(host))
-        file_text = await conn.run("ls -a", check=True)
-        file_list = file_text.stdout.split('\n')
-        for file in file_list:
+async def getfiles_machines(host, port, username, password, linux=True):
+    if host == '127.0.0.1':  # linux 여부를 잡아낼 수 있는 방법이 생각이 안 나서 임의로 설정
+        linux = False
+
+    if linux:
+        async with asyncssh.connect(host, port=port, username=username, password=password) as conn:
+            print("Host : {} Get Files".format(host))
+            file_text = await conn.run("ls -a", check=True)
+            file_list = file_text.stdout.split('\n')
+            for file in file_list:
+                if file.startswith("company_divided_pickle"):
+                    filename = file
+            try:
+                async with conn.start_sftp_client() as sftp:
+                    await sftp.get(filename)
+                await conn.run('rm ' + filename, check=True)
+            except UnboundLocalError:
+                print("company_divided_pickle 없음")
+                pass
+
+    else:  # Windows : linux == False
+
+        # ssh
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy)
+        ssh.connect(host, username=username, password=password, port=port)
+        # sftp
+        transport = paramiko.Transport((host, port))
+        transport.connect(None, username, password)
+        sftp = paramiko.SFTPClient.from_transport(transport)
+
+        stdin, stdout, stderr = ssh.exec_command("dir/b")
+        file_text = stdout.readlines()
+
+        for file in file_text:
             if file.startswith("company_divided_pickle"):
-                filename = file
+                filename = file.replace('\r\n', '')
+
         try:
-            async with conn.start_sftp_client() as sftp:
-                await sftp.get(filename)
-            await conn.run('rm ' + filename, check=True)
+            sftp.get("C:/Users/RX/"+filename, "G:/PycharmProjects/Stock_Calculator/"+filename)
+            stdin, stdout, stderr = ssh.exec_command("del " + filename)
         except UnboundLocalError:
             print("company_divided_pickle 없음")
             pass
@@ -966,40 +1045,62 @@ async def market_crawling(KOSPI_data_dict, KOSDAQ_data_dict, bond_dict, vkospi_d
 
 
 # KOSPI, KOSDAQ 52 High&Low, Trading Volume 계산
-def KOSPI_KOSDAQ_calculate(company_price_dict, KOSPI_data_dict, KOSDAQ_data_dict, indiv_company_update=False, force_update=False):
+def KOSPI_KOSDAQ_calculate(company_price_dict, KOSPI_data_dict, KOSDAQ_data_dict, indiv_company_update=True, force_update=False):
 
     dict_list = [KOSPI_data_dict, KOSDAQ_data_dict]
 
     if force_update:
         for date in KOSPI_data_dict.keys():
+            while len(KOSPI_data_dict[date]) < 8:
+                KOSPI_data_dict[date].append(0)
             for i in range(4, 8):
                 try:
                     KOSPI_data_dict[date][i] = 0
                 except IndexError:
                     pass
-                try:
-                    KOSDAQ_data_dict[date][i] = 0
-                except IndexError:
-                    pass
+            if date in KOSDAQ_data_dict.keys():
+                while len(KOSDAQ_data_dict[date]) < 8:
+                    KOSDAQ_data_dict[date].append(0)
+                for i in range(4, 8):
+                    try:
+                        KOSDAQ_data_dict[date][i] = 0
+                    except IndexError:
+                        pass
 
     for key in company_price_dict.keys():
         if key != '종목명':
 
             # print("{} 종목에서 52주 high, low, 거래량 계산하여 KOSPI, KOSDAQ dictionary update 중".format(key))
-
-            market_type = company_price_dict[key][0][20]
-            company_name = company_price_dict[key][0][1]
-
+            try:
+                market_type = company_price_dict[key][0][20]
+                company_name = company_price_dict[key][0][1]
+            except IndexError as E:
+                # print(E)
+                print(company_price_dict[key])
+                print(key)
+                # input()
+                pass
             high_value = 0
             low_value = 0
 
+            # 날짜 정렬 및 데이터 형식 관련
             price_data_dict = company_price_dict[key][1]
+            temp2 = list(price_data_dict.values())
+            # numpy.ndarray 와 list 간 정렬문제로, 임시 리스트를 만들어 복사한다
+            temp = []
+            for i in temp2:
+                if type(i) == np.ndarray:
+                    temp.append(i.tolist())
+                else:
+                    temp.append(i)
+            temp3 = sorted(temp, reverse=True)
+            del temp2
+            del temp
+            price_data_values = np.array(temp3, dtype=object)
 
             if indiv_company_update:  # 개별 company_price_dict의 모든 가격정보 업데이트
                 # 날짜, 종가, 거래량, 기관순매매량, 외인순매매량, 외인보유량, 외인보유율, 0, high/low, tradingvolume +-
                 try:  # Cal_52HighLow, TradingVol 계산
-
-                    price_data_values = np.array(list(price_data_dict.values()), dtype=object)
                     for i in range(len(price_data_values)):
 
                         # 데이터형식 변경
@@ -1017,9 +1118,9 @@ def KOSPI_KOSDAQ_calculate(company_price_dict, KOSPI_data_dict, KOSDAQ_data_dict
 
                         if price_data_values[i][8] == 0 or price_data_values[i][8] == '0':
                             try:
-                                if np.min(np.array(price_data_values[i: i + 260][:, 2], dtype=int)) == int(price_data_values[i][2]):  # 52주 최소가 해당 값
+                                if np.min(np.array(price_data_values[i: i + 260][:, 1], dtype=int)) == int(price_data_values[i][1]):  # 52주 최소가 해당 값
                                     price_data_values[i][8] = 'low'
-                                elif np.max(np.array(price_data_values[i: i + 260][:, 2], dtype=int)) == int(price_data_values[i][2]):  # 52주 최대가 해당 값
+                                elif np.max(np.array(price_data_values[i: i + 260][:, 1], dtype=int)) == int(price_data_values[i][1]):  # 52주 최대가 해당 값
                                     price_data_values[i][8] = 'high'
                                 else:
                                     price_data_values[i][8] = '1'  # 52주 최저, 최고 아님. 계산 완료
@@ -1048,6 +1149,11 @@ def KOSPI_KOSDAQ_calculate(company_price_dict, KOSPI_data_dict, KOSDAQ_data_dict
                     print("{} 종목 52 최고 - 최저, 거래량 계산 오류".format(key))
                     print(e)
 
+                for i in range(len(price_data_values)):
+                    price_data_dict[price_data_values[i][0]] = price_data_values[i]
+
+            company_price_dict[key][1] = price_data_dict
+
             for dates in price_data_dict.keys():
                 try:
                     if market_type == 'kospi':
@@ -1061,15 +1167,13 @@ def KOSPI_KOSDAQ_calculate(company_price_dict, KOSPI_data_dict, KOSDAQ_data_dict
                         for i in range(8 - len(data_dict[dates])):
                             data_dict[dates].append(0)
 
-                    if force_update or \
-                        data_dict[dates][4] == 0 or data_dict[dates][5] == 0:  # high/low 추가 안 됨
+                    if data_dict[dates][4] == 0 or data_dict[dates][5] == 0:  # high/low 추가 안 됨
                         if price_data_dict[dates][8] == 'high':
                             data_dict[dates][4] += 1
                         elif price_data_dict[dates][8] == 'low':
                             data_dict[dates][5] += 1
 
-                    if force_update or \
-                        data_dict[dates][6] == 0 or data_dict[dates][7] == 0:
+                    if data_dict[dates][6] == 0 or data_dict[dates][7] == 0:
                         if price_data_dict[dates][9] >= 0:
                             data_dict[dates][6] += price_data_dict[dates][9]
                         else:
@@ -1089,51 +1193,97 @@ if __name__ == '__main__':
     # company 로딩
     start_time = datetime.datetime.now()
     print("START TIME : {}".format(str(datetime.datetime.now())))
-    company_pickle = [None,None]
-    with open("Files/code_list", 'rb') as f:
-        company_pickle[0] = pickle.load(f)
-    with open("Files/company_info", 'rb') as f:
-        company_pickle[1] = pickle.load(f)
+    company_pickle = [None, None]
+    # with open("Files/code_list", 'rb') as f:
+    company_pickle[0] = company_list()
+    try:
+        with open("Files/company_info", 'rb') as f:
+            company_pickle[1] = pickle.load(f)
+    except FileNotFoundError:
+        company_pickle[1] = {}
+        pass
+    print("MONTTHS_LOADING START")
+    months_loading(company_pickle[1], "Stock_Price", "", n_month=10, company_tf=True)
 
-    months_loading(company_pickle[1], "Stock_Price", "", company_tf=True)
+    # company_pickle 이 살아있을 때 용의 loading
+    # with open('company_pickle', 'rb') as f:
+    #     company_pickle = pickle.load(f)
+
+    # print(company_pickle)
+    # input()
 
     # KOSPI, KOSDAQ 로딩 크롤링
+    market_nmonth = 10
     try:
         KOSPI_dict = {}
-        months_loading(KOSPI_dict, "Market", "KOSPI")
+        months_loading(KOSPI_dict, "Market", "KOSPI", n_month=market_nmonth)
     except FileNotFoundError:
         KOSPI_dict = {}
     try:
         KOSDAQ_dict = {}
-        months_loading(KOSDAQ_dict, "Market", "KOSDAQ")
+        months_loading(KOSDAQ_dict, "Market", "KOSDAQ", n_month=market_nmonth)
     except FileNotFoundError:
         KOSDAQ_dict = {}
     try:
         bond_dict = {'3m' : {}, '6m' : {}, '9m' : {}, '1y' : {}, '1y6m' : {}, '2y' : {}, '3y' : {}, '5y' : {}}
         for key in bond_dict.keys():
-            months_loading(bond_dict[key], "Market", "bond_"+key)
+            months_loading(bond_dict[key], "Market", "bond_"+key, n_month=market_nmonth)
     except FileNotFoundError:
         bond_dict = {'3m' : {}, '6m' : {}, '9m' : {}, '1y' : {}, '1y6m' : {}, '2y' : {}, '3y' : {}, '5y' : {}}
     try:
         vkospi_dict = {}
-        months_loading(vkospi_dict, "Market", "vkospi")
+        months_loading(vkospi_dict, "Market", "vkospi", n_month=market_nmonth)
     except FileNotFoundError:
         vkospi_dict = {}
     try:
         kosis_dict = {}
-        months_loading(kosis_dict, "Market", "kosis")
+        months_loading(kosis_dict, "Market", "kosis", n_month=market_nmonth)
     except FileNotFoundError:
         kosis_dict = {}
 
     # 크롤링
-    print("각 기계들에 크롤링 명령 시작")
-    company_pickle = asyncio.run(dispersion_crawling_data(company_pickle[0], company_pickle[1], limits=20))
+
     # 회사 기본정보, 연간재무, 분기재무
+    # 구) 각 기계들에게 나눠서 크롤링
+    # print("각 기계들에 크롤링 명령 시작")
+    # company_pickle = asyncio.run(dispersion_crawling_data(company_pickle[0], company_pickle[1], limits=3))
 
-    # overwrite_tf = True
-    overwrite_tf = False
+    # 개별 회사 크롤링 시작
 
-    company_noprice_dict = {}
+    # 중간 세이브 기능 관련 (안 씀)
+    # try:
+    #     with open("temporarily_save.txt", 'r') as f:
+    #         start_num = int(f.read())
+    # except Exception as e:
+    #     print(e)
+    #     start_num = 0
+
+    start_num = 0
+    company_list, company_dict = company_pickle
+    update = False
+    limits = 2
+    company_dict = asyncio.run(company_crawling_async(company_list, company_dict, "filename", start_num=start_num, update=update, limits=limits))
+
+    overwrite_tf = True
+    # overwrite_tf = Falsee
+
+    KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict = asyncio.run(market_crawling(
+        KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict
+    ))
+
+    # 코스피, 코스닥 계산
+    KOSPI_dict, KOSDAQ_dict, company_pickle[1] = KOSPI_KOSDAQ_calculate(company_pickle[1], KOSPI_dict, KOSDAQ_dict,
+                                                                        indiv_company_update=True, force_update=True)
+    # KOSPI_dict, KOSDAQ_dict, company_pickle[1] = KOSPI_KOSDAQ_calculate(company_pickle[1], KOSPI_dict, KOSDAQ_dict)
+
+    # overwrite_tf = False
+    overwrite_tf = True
+    with open("Files/code_list", 'wb') as f:
+        pickle.dump(company_pickle[0], f)
+
+        company_noprice_dict = {}
+
+    print("회사 정보 저장")
     for key in company_pickle[1].keys():
         company_noprice_dict[key] = [
             company_pickle[1][key][0],
@@ -1150,24 +1300,7 @@ if __name__ == '__main__':
             object_dict = company_pickle[1][company_name][1]
             split_date(object_dict, "Stock_Price", company_name, overwrite=overwrite_tf)
 
-
-    KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict = asyncio.run(market_crawling(
-        KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict
-    ))
-
-    # 코스피, 코스닥 계산
-    KOSPI_dict, KOSDAQ_dict, company_pickle[1] = KOSPI_KOSDAQ_calculate(company_pickle[1], KOSPI_dict, KOSDAQ_dict,
-                                                                        indiv_company_update=True, force_update=True)
-    # KOSPI_dict, KOSDAQ_dict, company_pickle[1] = KOSPI_KOSDAQ_calculate(company_pickle[1], KOSPI_dict, KOSDAQ_dict)
-
-    overwrite_tf = False
-    # overwrite_tf = True
-
-    with open("Files/code_list", 'wb') as f:
-        pickle.dump(company_pickle[0], f)
-
     print("KOSPI, KOSDAQ, kosis, vkospi, bond dictionary 저장")
-
     split_date(KOSPI_dict, "Market", "KOSPI", overwrite=overwrite_tf)
     split_date(KOSDAQ_dict, "Market", "KOSDAQ", overwrite=overwrite_tf)
     split_date(kosis_dict, "Market", "kosis", overwrite=overwrite_tf)

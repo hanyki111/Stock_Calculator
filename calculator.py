@@ -1,5 +1,6 @@
 # import ast
 import asyncssh
+import csv
 import json
 import numpy as np
 import pandas as pd
@@ -20,7 +21,7 @@ import os
 
 
 class loading:
-        
+
     def split_date(self, object_dict, path, name, overwrite=False):
         # bond_dict의 경우 하위 dict가 3m, 6m ...이므로 각 3m, 6m...을 object_dict로 넣어야 함
 
@@ -143,28 +144,28 @@ class loading:
         # KOSPI, KOSDAQ, bond, vkospi, kosis 로딩
         try:
             KOSPI_dict = {}
-            self.months_loading(KOSPI_dict, "Market", "KOSPI")
+            self.months_loading(KOSPI_dict, "Market", "KOSPI", n_month=n_month)
         except FileNotFoundError:
             KOSPI_dict = {}
         try:
             KOSDAQ_dict = {}
-            self.months_loading(KOSDAQ_dict, "Market", "KOSDAQ")
+            self.months_loading(KOSDAQ_dict, "Market", "KOSDAQ", n_month=n_month)
         except FileNotFoundError:
             KOSDAQ_dict = {}
         try:
             bond_dict = {'3m' : {}, '6m' : {}, '9m' : {}, '1y' : {}, '1y6m' : {}, '2y' : {}, '3y' : {}, '5y' : {}}
             for key in bond_dict.keys():
-                self.months_loading(bond_dict[key], "Market", "bond_"+key)
+                self.months_loading(bond_dict[key], "Market", "bond_"+key, n_month=n_month)
         except FileNotFoundError:
             bond_dict = {'3m' : {}, '6m' : {}, '9m' : {}, '1y' : {}, '1y6m' : {}, '2y' : {}, '3y' : {}, '5y' : {}}
         try:
             vkospi_dict = {}
-            self.months_loading(vkospi_dict, "Market", "vkospi")
+            self.months_loading(vkospi_dict, "Market", "vkospi", n_month=n_month)
         except FileNotFoundError:
             vkospi_dict = {}
         try:
             kosis_dict = {}
-            self.months_loading(kosis_dict, "Market", "kosis")
+            self.months_loading(kosis_dict, "Market", "kosis", n_month=n_month)
         except FileNotFoundError:
             kosis_dict = {}
 
@@ -173,7 +174,12 @@ class loading:
 ### 긁어온 정보를 계산한다
 
 class FGI:
+
     def cal_cumulative_dist(self, x, mean, std):
+        norm_dist = stats.norm(loc = mean, scale = std)
+        return (norm_dist.cdf(x=x))
+
+    def cal_cumulative_dist_scorize(self, x, mean, std):
         norm_dist = stats.norm(loc = mean, scale = std)
         if x > mean:
             return (norm_dist.cdf(x=x) - norm_dist.cdf(x=mean)) * 200
@@ -184,53 +190,62 @@ class FGI:
         # KOSPI_dict, KOSDAQ_dict를 입력
         # ratio_data_list 가 나온다
         # ratio_data_list = [날짜, high, low, high-low, 분포점수]
-        
-        ratio_data_list = []   
-        
+
+        ratio_data_list = []
+
         for dates in KOSPI_dict.keys():
             date = dates
+            # print(dates)
+            # print(KOSPI_dict[dates])
+            # print(KOSDAQ_dict[dates])
+            # kospi_high = int(KOSPI_dict[dates][4])
+            # kospi_low = int(KOSPI_dict[dates][5])
+            # kosdaq_high = int(KOSDAQ_dict[dates][4])
+            # kosdaq_low = int(KOSDAQ_dict[dates][5])
+
+
             try:
                 kospi_high = int(KOSPI_dict[dates][4])
             except Exception as e:
-                print(e)
+                print(dates, e)
                 kospi_high = 0
             try:
                 kospi_low = int(KOSPI_dict[dates][5])
             except Exception as e:
-                print(e)
+                print(dates, e)
                 kospi_low = 0
             try:
                 kosdaq_high = int(KOSDAQ_dict[dates][4])
             except Exception as e:
-                print(e)
+                print(dates, e)
                 kosdaq_high = 0
             try:
                 kosdaq_low = int(KOSDAQ_dict[dates][5])
             except Exception as e:
-                print(e)
+                print(dates, e)
                 kosdaq_low = 0
-            
+
             high = kospi_high + kosdaq_high
             low = kospi_low + kosdaq_low
-            
-            ratio_data_list.append([date, high, low, high-low])        
-        
-        ratio_data_index3_np = np.array(ratio_data_list)[:, 3].astype(int)    
-        
+
+            ratio_data_list.append([date, high, low, high-low])
+
+        ratio_data_index3_np = np.array(ratio_data_list)[:, 3].astype(int)
+
         ratio_mean = np.mean(ratio_data_index3_np)
         ratio_std = np.std(ratio_data_index3_np)
-        
+
         ratio_data_dict = {}
-        
+
         for i in range(len(ratio_data_list)):
             ratio_data_list[i].append(
-                self.cal_cumulative_dist(ratio_data_list[i][3], ratio_mean, ratio_std)
+                self.cal_cumulative_dist_scorize(ratio_data_list[i][3], ratio_mean, ratio_std)
             )
-            
+
             ratio_data_dict[ratio_data_list[i][0]] = ratio_data_list[i]
-            
+
         return ratio_data_dict
-    
+
     def average125_kospi_estrangement(self, KOSPI_dict):  # + 탐욕, - 공포
         # KOSPI_dict의 125일 이평선과 당일 값의 이격도를 계산
         # [날짜, 당일 코스피, ]
@@ -241,7 +256,7 @@ class FGI:
             kospi_value[i] = np.array(kospi_value[i], dtype=object)
         print(kospi_value[0])
         average125 = pd.DataFrame(kospi_value[:, 1].astype(float)).rolling(window=125).mean().dropna().to_numpy().reshape(-1)
-        
+
         estrangement_average125_kospi_list = []
         for i in range(len(average125)):
             estrangement_average125_kospi_list.append([
@@ -250,24 +265,24 @@ class FGI:
                 float(average125[i]),  # 125일 이평선 값
                 float(kospi_value[i][1]) - float(average125[i])  # 코스피와 125일 이평선 사이의 이격도
                                                     ])
-        
+
         estrangement_index3_np = np.array(estrangement_average125_kospi_list)[:, 3].astype(float)
-        
+
         estrangement_mean = np.mean(estrangement_index3_np)
         estrangement_std = np.std(estrangement_index3_np)
-        
+
         estrangement_dict = {}
-        
+
         for i in range(len(estrangement_average125_kospi_list)):
-            
+
             estrangement_average125_kospi_list[i].append(
-                self.cal_cumulative_dist(estrangement_average125_kospi_list[i][3],
+                self.cal_cumulative_dist_scorize(estrangement_average125_kospi_list[i][3],
                                 estrangement_mean,
                                 estrangement_std)
             )
-            
+
             estrangement_dict[estrangement_average125_kospi_list[i][0]] = estrangement_average125_kospi_list[i]
-        
+
         return estrangement_dict
         pass  # average125_kospi_estrangement 의 끝
 
@@ -276,14 +291,17 @@ class FGI:
         # [날짜, 당일 코스피, ]
         # 20일간 수익률 계산을 위해 [::-1] 을 취함 - 과거 날짜가 앞 인덱스
         # 해당 혼란 방지를 위해 모든 아웃풋을 딕셔너리로 (key = date)
-        
-        kospi_value = np.array(list(KOSPI_dict.values()))
+        temp = list(KOSPI_dict.values())
+        temp.sort(reverse=True)
+        kospi_value = np.array(temp)
         # 최신 날짜부터
+
+        # 이 부분이 뭔가 이상함함
         stock_20d_profit = pd.DataFrame(kospi_value[:, 1].astype(float)).pct_change(periods=20).dropna().to_numpy()[::-1]
-        
+
         stock_bond_list = []
         stock_bond_dict = {}
-        
+
         for i in range(len(stock_20d_profit)):
             try:
                 date = kospi_value[i][0]
@@ -296,36 +314,36 @@ class FGI:
                 ])
             except KeyError:
                 print("{} Date Key Error 발생".format(date))
-            
+
         stock_bond_index4_np = np.array(stock_bond_list)[:, 4].astype(float)
-        
+
         stock_bond_mean = np.mean(stock_bond_index4_np)
         stock_bond_std = np.std(stock_bond_index4_np)
-        
+
         for i in range(len(stock_bond_list)):
-            
+
             stock_bond_list[i].append(
-                self.cal_cumulative_dist(
+                self.cal_cumulative_dist_scorize(
                     stock_bond_list[i][4],
                     stock_bond_mean,
                     stock_bond_std
                 )
             )
-            
-            date = stock_bond_list[i][0]        
+
+            date = stock_bond_list[i][0]
             stock_bond_dict[date] = stock_bond_list[i]
-            
+
         return stock_bond_dict
         pass  # safe_haven_demand 의 끝
 
     def credit_vs_speculation(self, bond_dict_2y):  # + 탐욕, - 공포
         # - 점수 : 투기 이율 평균이 작다 --> 공포. + : 위험선호 = 탐욕
-    
+
         credit_spec_list = []
         credit_spec_dict = {}
-        
+
         for date in bond_dict_2y.keys():
-            
+
             credit_average = np.mean(bond_dict_2y[date][2:9].astype(float))  # 1은 국고채,
             # AAA, AA+, AA, AA-, A+, A, A-
             spec_average = np.mean(bond_dict_2y[date][9:12].astype(float))
@@ -337,40 +355,40 @@ class FGI:
                 spec_average,  # 투기등급 채권 이율 평균
                 spec_average / credit_average
             ])
-            
+
         credit_spec_index3_np = np.array(credit_spec_list)[:, 3].astype(float)
         credit_spec_mean = np.mean(credit_spec_index3_np)
         credit_spec_std = np.std(credit_spec_index3_np)
 
         for i in range(len(credit_spec_list)):
             date = credit_spec_list[i][0]
-            
+
             credit_spec_list[i].append(
-                self.cal_cumulative_dist(
+                self.cal_cumulative_dist_scorize(
                     credit_spec_list[i][3],
                     credit_spec_mean,
                     credit_spec_std
                 )
             )
             credit_spec_dict[date] = credit_spec_list[i]
-        
+
         return credit_spec_dict
         pass  # credit_vs_speculation의 끝
-    
+
     def stock_tradevol_breath(self, KOSPI_dict, KOSDAQ_dict):  # + : 탐욕, - : 공포
         # KOSPI_dict, KOSDAQ_dict 투입
         # stock_breath_dict 리턴
-        
+
         stock_breath_list = []
         stock_breath_dict = {}
-        
+
         for dates in KOSPI_dict.keys():
             try:
                 kospi_vol_p = KOSPI_dict[dates][6]
                 kospi_vol_m = KOSPI_dict[dates][7]
                 kosdaq_vol_p = KOSDAQ_dict[dates][6]
                 kosdaq_vol_m = KOSDAQ_dict[dates][7]
-                
+
                 stock_breath_list.append(
                 [
                     dates,  # 날짜
@@ -381,26 +399,26 @@ class FGI:
                     kosdaq_vol_m,
                     kospi_vol_m + kosdaq_vol_m,
                     kospi_vol_p + kosdaq_vol_p + kospi_vol_m + kosdaq_vol_m
-                    
+
                 ])
-                
+
             except KeyError:
                 pass
-        
+
         stock_breath_index7_np = np.array(stock_breath_list)[:, 7].astype(float)
         stock_breath_mean = np.mean(stock_breath_index7_np)
         stock_breath_std = np.std(stock_breath_index7_np)
-        
+
         for i in range(len(stock_breath_list)):
             stock_breath_list[i].append(
-                self.cal_cumulative_dist(
+                self.cal_cumulative_dist_scorize(
                 stock_breath_list[i][7],
                 stock_breath_mean,
-                stock_breath_std)            
+                stock_breath_std)
             )
             date = stock_breath_list[i][0]
             stock_breath_dict[date] = stock_breath_list[i]
-            
+
         return stock_breath_dict
         pass  # kospi_tradevol_breath 의 끝
 
@@ -408,9 +426,20 @@ class FGI:
         # 원래라면 + 공포, - 탐욕 이므로 -값을 붙여서 탐욕과 공포를 바꾼다
         # vkospi_dict의 50일 이평선과 당일 값의 이격도를 계산
         # [날짜, 당일 v코스피, 125 평균, v코스피-평균, 점수]
-        vkospi_value = np.array(list(vkospi_dict.values()))
+
+        #sort 필요함
+        temp2 = list(vkospi_dict.values())
+        # numpy.ndarray 와 list 간 정렬문제로, 임시 리스트를 만들어 복사한다
+        temp = []
+        for i in temp2:
+            if type(i) == np.ndarray:
+                temp.append(i.tolist())
+            else:
+                temp.append(i)
+        del temp2
+        vkospi_value = np.array(temp, dtype=object)
         average50= pd.DataFrame(vkospi_value[:, 1].astype(float)).rolling(window=50).mean().dropna().to_numpy().reshape(-1)
-        
+
         estrangement_vkospi_list = []
         for i in range(len(average50)):
             estrangement_vkospi_list.append([
@@ -419,35 +448,35 @@ class FGI:
                 float(average50[i]),  # 50일 이평선 값
                 float(vkospi_value[i][1]) - float(average50[i])  # v코스피와 50일 이평선 사이의 이격도
             ])
-        
-        estrangement_index3_np = np.array(estrangement_vkospi_list)[:, 3].astype(float)    
+
+        estrangement_index3_np = np.array(estrangement_vkospi_list)[:, 3].astype(float)
         estrangement_mean = np.mean(estrangement_index3_np)
         estrangement_std = np.std(estrangement_index3_np)
-        
+
         estrangement_dict = {}
-        
+
         for i in range(len(estrangement_vkospi_list)):
-            
+
             estrangement_vkospi_list[i].append(
-                -1 * self.cal_cumulative_dist(estrangement_vkospi_list[i][3],
+                -1 * self.cal_cumulative_dist_scorize(estrangement_vkospi_list[i][3],
                                 estrangement_mean,
                                 estrangement_std)
             )
-            
+
             estrangement_dict[estrangement_vkospi_list[i][0]] = estrangement_vkospi_list[i]
-        
+
         return estrangement_dict
         pass  # average_vkospi_estrangement 의 끝
-    
+
     def fear_greed_index(self, KOSPI_dict, KOSDAQ_dict, bond_dict_2y, vkospi_dict):
-    
+
         ratio_highlow_dict = self.ratio_52_highlow(KOSPI_dict, KOSDAQ_dict)
         kospi_estrangement_dict = self.average125_kospi_estrangement(KOSPI_dict)
         safe_haven_dict = self.safe_haven_demand(KOSPI_dict, bond_dict_2y)
         credit_spec_dict = self.credit_vs_speculation(bond_dict_2y)
         stock_tradevol_dict = self.stock_tradevol_breath(KOSPI_dict, KOSDAQ_dict)
         vkospi_estrangement_dict = self.average50_vkospi_estrange(vkospi_dict)
-        
+
         dicts_list = [ratio_highlow_dict,
                     kospi_estrangement_dict,
                     safe_haven_dict,
@@ -472,10 +501,10 @@ class FGI:
         keys = keys_list[keyindex]
 
         keys.sort(reverse=True)
-        
+
         fgi_dict = {}
         # fgi_list = []
-        
+
         for dates in keys:
             try:
                 temp_list = []
@@ -484,13 +513,13 @@ class FGI:
                     temp_list.append(dicts[dates][-1])
                 mean = np.mean(np.array(temp_list)[1:].astype(float))
                 temp_list.append(mean)
-                
+
                 # fgi_list.append(temp_list)
                 fgi_dict[dates] = temp_list
             except KeyError:
-                
+
                 pass
-            
+
         return fgi_dict
         pass  # fear_greed_index 의 끝
 
@@ -727,7 +756,7 @@ class DNN(FGI):
                 std
                 )
         except:
-            output = -1
+            output = 0
             
         return output
         pass  # company_price_multi 의 끝
@@ -737,7 +766,9 @@ class DNN(FGI):
         # 20일 이평선 +- std 어디에 위치해있는가? (볼린져 밴드)
         # 위의 것과는 다르게 이 함수는 개별 회사 단위로 들어가며 for keys in dict.keys() 를 해줘야 한다    
         
-        key = company_name    
+        key = company_name
+
+        # sort 필요
         price_list = np.array(list(company_dict[key][1].values()))
         
         # 20d, 5d rolling mean을 시행하고, 없는 값들을 제외한다
@@ -803,7 +834,7 @@ class DNN(FGI):
         return output
         pass  # entire_market_meanstd의 끝
 
-    def company_score(self, company_dict, fear_greed_index_dict, keys, year, month, day, mean_marketbeta, std_marketbeta, mean_company_profit,
+    def company_score(self, company_dict, fear_greed_index_dict, kosis_dict, keys, year, month, day, mean_marketbeta, std_marketbeta, mean_company_profit,
         std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
         std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight):       
         # keys = company_name
@@ -813,9 +844,10 @@ class DNN(FGI):
         input_date = datetime.datetime(year=year, month=month, day=day)
         
         fear_greed_index = fear_greed_index_dict[date]
-        
+
         # 52주 베타
-        company_marketbeta = float(company_dict[keys][0][21])
+        present_market_idx, past_market_idx = self.market_index(kosis_dict, year, month, day=28)
+        company_marketbeta = float(company_dict[keys][0][21]) * (present_market_idx - past_market_idx)
         company_marketbeta_score = self.cal_cumulative_dist(company_marketbeta, mean_marketbeta, std_marketbeta)
         
         # 1/per (profit) ~ company_debt까지.
@@ -856,10 +888,7 @@ class DNN(FGI):
                 list_index = i
                 break
         
-        company_weight =int(
-                        int(company_dict[keys][1][term_list[list_index]][1]) *
-                        int(company_dict[keys][0][3])
-                        /10000)
+        company_weight =int(company_dict[keys][0][2]) * int(company_dict[keys][0][3]) / 10000
         company_weight_score = self.cal_cumulative_dist(company_weight, mean_company_weight, std_company_weight)
             
         # (52 최고 - 최저) / 52최저 : price_variability_meanstd
@@ -900,7 +929,7 @@ class DNN(FGI):
 
 class DNN_Training(DNN):
 
-    def company_score(self, company_dict, fear_greed_index_dict, keys, year, month, day, mean_marketbeta, std_marketbeta, mean_company_profit,
+    def company_score(self, company_dict, fear_greed_index_dict, kosis_dict, keys, year, month, day, mean_marketbeta, std_marketbeta, mean_company_profit,
     std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
     std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight):       
     # keys = company_name
@@ -912,7 +941,9 @@ class DNN_Training(DNN):
         fear_greed_index = fear_greed_index_dict[date]
         
         # 52주 베타
-        company_marketbeta = float(company_dict[keys][0][21])
+
+        present_market_idx, past_market_idx = self.market_index(kosis_dict, year, month, day=28)
+        company_marketbeta = float(company_dict[keys][0][21]) * (present_market_idx - past_market_idx)
         company_marketbeta_score = self.cal_cumulative_dist(company_marketbeta, mean_marketbeta, std_marketbeta)
         
         # 1/per (profit) ~ company_debt까지.
@@ -994,7 +1025,7 @@ class DNN_Training(DNN):
         return output
         pass  # company_score의 끝
 
-    def company_training_data(self, company_dict, fear_greed_index_dict, keys, mean_marketbeta, std_marketbeta, mean_company_profit,
+    def company_training_data(self, company_dict, fear_greed_index_dict, kosis_dict, keys, mean_marketbeta, std_marketbeta, mean_company_profit,
     std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
     std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight):       
     # keys = company_name
@@ -1032,7 +1063,7 @@ class DNN_Training(DNN):
                 elif avg_price_fut_ratio < 0.95:
                     answer = 4
 
-                output = self.company_score(company_dict, fear_greed_index_dict, keys, year, int(month), int(day), mean_marketbeta, std_marketbeta, mean_company_profit,
+                output = self.company_score(company_dict, fear_greed_index_dict, kosis_dict, keys, year, int(month), int(day), mean_marketbeta, std_marketbeta, mean_company_profit,
                                         std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
                                         std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight)
                 output.append(answer)
@@ -1045,14 +1076,14 @@ class DNN_Training(DNN):
         return answer_list
         pass  # company_score의 끝
 
-    def entire_dnn_training_data(self, company_dict, fear_greed_index_dict, mean_marketbeta, std_marketbeta, mean_company_profit,
+    def entire_dnn_training_data(self, company_dict, fear_greed_index_dict, kosis_dict, mean_marketbeta, std_marketbeta, mean_company_profit,
     std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
     std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight):
         
         test_list = []
         for keys in company_dict.keys():
             if keys != "종목명":
-                test_list.append(self.company_training_data(company_dict, fear_greed_index_dict, keys, mean_marketbeta, std_marketbeta, mean_company_profit,
+                test_list.append(self.company_training_data(company_dict, fear_greed_index_dict, kosis_dict, keys, mean_marketbeta, std_marketbeta, mean_company_profit,
                                 std_company_profit, mean_company_property, std_company_property, mean_company_debt, std_company_debt, mean_company_variability,
                                 std_company_variability, mean_company_tradevol, std_company_tradevol, mean_company_weight, std_company_weight))
         return test_list
@@ -1077,11 +1108,11 @@ class server_related():
             print(result.stdout, end='')
             return result.stdout
 '''
+
 if __name__=="__main__":
 
     loading_cls = loading()
     company_pickle, KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict = loading_cls.loading_data(n_month=15)
-
     fgi = FGI()
     fgi_dict = fgi.fear_greed_index(KOSPI_dict, KOSDAQ_dict, bond_dict['2y'], vkospi_dict)
 
@@ -1089,10 +1120,66 @@ if __name__=="__main__":
     year = int(date[:4])
     month = int(date[5:7])
     day = int(date[8:])
-
+    #
     print(date)
 
-    if not os.path.isfile('Files\\DNN\\Entire\\' + date):
+
+    '''
+    ###
+    dnn = DNN()
+    company_dict = company_pickle[1]
+    market_meanstd = dnn.entire_market_meanstd(kosis_dict, company_dict, year, month, day)
+
+    # 모델 로딩 후 평가 필요
+
+    model = keras.Sequential([
+        keras.layers.InputLayer(input_shape=(12,), name = 'Input'),
+        keras.layers.Dense(100, activation='relu', name='Dense_1'),
+        keras.layers.Dense(5, activation='softmax', name='predictions')])
+
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=0.001, beta_1=0.9, beta_2=0.999),
+                  loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    model.load_weights('price_predict_v4_weight')
+    print("keras 모듈 임포트, 모델 로딩")
+
+    time.sleep(3)
+
+    entire_dict = {}
+    recommand_dict = {}
+
+    for keys in company_dict.keys():
+        print(keys + " 종목 가격 예측")
+        try:
+            if keys != "종목명":
+                test_list = dnn.company_score(company_dict, fgi_dict, kosis_dict, keys, year, month, day, *market_meanstd)
+                test_list = np.array(test_list).reshape(-1, 12)
+                prediction = model.predict(test_list)
+
+                print(keys, prediction)
+
+                with open('temp.csv', 'a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(test_list)
+                    writer.writerow([keys, prediction])
+
+                entire_dict[keys] = prediction
+                if prediction.argmax() == 0 and prediction[0][1] >= prediction[0][2] \
+                        and prediction[0][1] >= prediction[0][3] and prediction[0][1] > prediction[0][4]:
+                    recommand_dict[keys] = prediction
+                    pass
+                # if prediction.argmax() == 0:
+                #     recommand_dict[keys] = prediction
+                #     pass
+
+        except:
+            print(keys + " 종목 가격 예측 실패")
+            pass
+
+    input()
+    '''
+
+    ### DNN 추천목록
+    if not os.path.isfile('Files\\DNN\\Entire\\' + date) or True:
 
         dnn = DNN()
         company_dict = company_pickle[1]
@@ -1107,7 +1194,7 @@ if __name__=="__main__":
 
         model.compile(optimizer=keras.optimizers.Adam(learning_rate=0.001, beta_1=0.9, beta_2=0.999),
                       loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-        model.load_weights('price_predict_dnn_weight')
+        model.load_weights('price_predict_dnn_v2_weight')
         print("keras 모듈 임포트, 모델 로딩")
 
         time.sleep(3)
@@ -1115,19 +1202,30 @@ if __name__=="__main__":
         entire_dict = {}
         recommand_dict = {}
 
+        try:
+            print("민감도 설정, 0~1 사이의 소수 입력. 오류 발생 시 0.4로 설정")
+            sensitivity = float(input("민감도 : "))
+        except ValueError:
+            sensitivity = 0.4
+
         for keys in company_dict.keys():
             print(keys + " 종목 가격 예측")
             try:
                 if keys != "종목명":
-                    test_list = dnn.company_score(company_dict, fgi_dict, keys, year, month, day, *market_meanstd)
+                    test_list = dnn.company_score(company_dict, fgi_dict, kosis_dict, keys, year, month, day, *market_meanstd)
                     test_list = np.array(test_list).reshape(-1, 12)
                     prediction = model.predict(test_list)
 
                     print(keys, prediction)
                     entire_dict[keys] = prediction
-                    if prediction.argmax() == 0 and prediction[0][1] >= prediction[0][2] \
-                            and prediction[0][1] >= prediction[0][3] and prediction[0][1] > prediction[0][4]:
+
+
+                    if prediction[0].argmax() == 0 and prediction[0][0] >= sensitivity:
                         recommand_dict[keys] = prediction
+                        pass
+                    # if prediction.argmax() == 0:
+                    #     recommand_dict[keys] = prediction
+                    #     pass
 
             except:
                 print(keys + " 종목 가격 예측 실패")
@@ -1159,9 +1257,11 @@ if __name__=="__main__":
         sftp = paramiko.SFTPClient.from_transport(transport)
 
         # 날짜 폴더 생성
+        print("날짜 폴더 생성")
         stdin, stdout, stderr = ssh.exec_command("mkdir " + server_dir + "AI/" + date)
         time.sleep(1)
         print(stdout.readlines())
+        # input("날짜 폴더 생성 완료?")
         '''        
         try:
             stdin, stdout, stderr = ssh.exec_command("mkdir " + server_dir + "AI/" + date)
@@ -1192,7 +1292,14 @@ if __name__=="__main__":
         # get한 filelist.json을 수정한다
         with open("filelist.json", 'r') as f:
             json_filelist = json.load(f)
-        json_filelist['AI'] = [date] + json_filelist['AI'][:-1]
+
+        # json_filelist['AI'] = [date] + json_filelist['AI'][:-1]
+        if date not in json_filelist['AI']:
+            if len(json_filelist['AI']) >=5:
+                json_filelist['AI'] = [date] + json_filelist['AI'][:-1]
+            else:
+                json_filelist['AI'] += [date]
+
         with open("filelist.json", 'w') as f:
             json.dump(json_filelist, f)
         # 수정한 filelist.json을 서버에 put 한다
@@ -1215,29 +1322,165 @@ if __name__=="__main__":
     else:
         print(date + " 날짜 추천목록 있음. 분석 종료.")
 
+    ### 저평가
+
+    if not os.path.isfile('Files\\Undervalued\\Entire\\' + date):
+        company_dict = company_pickle[1]
+
+        for keys in company_dict.keys():
+
+            if keys != "종목명":
+
+                pass
+
+            pass
     '''
+    try:
+        #if dict_company_list[keys][0][21] <= (max_volumerank * float(self.Line_MaxVoulmeRank.text()) / 100):
+        if keys != "종목명":
+            #print(keys)
+            #print(dict_company_list[keys][0][0])
+            if float(dict_company_list[keys][0][0][9]) * 1.05 >= dict_company_list[keys][1][1][2]: #52최저*1.05 > 최신 종가
+                if dict_company_list[keys][0][0][19] == None and dict_company_list[keys][0][18] >= dict_company_list[keys][0][17]:
+                    self.List_Lowest_Company.addItem(keys)
+                    pass
+                elif dict_company_list[keys][0][0][19] >= dict_company_list[keys][0][0][18] >= dict_company_list[keys][0][0][17]:
+                    self.List_Lowest_Company.addItem(keys)
+            	    pass
+
+        except:
+            print("종목 : " + keys + " - 계산 오류 발생, 해당 종목 건너뜀")
+            pass'''
+
+
+    ### 마법공식
+        # PER, ROA(ROE)를 기준으로
+        # ROE = (PBR / PER) * 100
+        ### 전체 업종, 각 섹터별로 1/PER, ROE가 큰 순서대로 랭킹을 매긴다
+
+
+    company_code_list = []
+    # 한국거래소 - 주식 - 상장현황 - 상장회사검색
+    with open('Company_Code.csv', 'r', encoding='UTF-8') as codefile:
+        csvCode = csv.reader(codefile)
+        for row in csvCode:
+            company_code_list.append([row[1].zfill(6), row[2], row[3], row[4], row[5], row[6]])
+
+    company_info_list = []
+    # 리스트에 PER, PBR, ROE를 추가
+    for i in range(1, len(company_code_list)):
+        try:
+            # print(key, company_dict[key][0][4], company_dict[key][0][6])
+            key = company_code_list[i][1]
+            per = float(company_dict[key][0][4])
+            pbr = float(company_dict[key][0][6])
+            roe = (pbr / per) * 100
+
+            company_code_list[i].append(per)
+            company_code_list[i].append(pbr)
+            company_code_list[i].append(roe)
+            # 정보가 있는 회사들만 추려서 저장
+            company_info_list.append(company_code_list[i])
+        except (TypeError, ValueError):
+            print(key, company_dict[key][0][4], company_dict[key][0][6])
+            pass
+
+    # company_code_list에서 업종 리스트를 추려서 unique 값을 저장. '전체' 추가
+    company_info_np = np.array(company_info_list)
+    sector_list = list(set(company_info_np[:, 3]))
+    sector_list.insert(0, '전체')
+
+    # 딕셔너리 초기화 및 초기 모양 설정
+    magic_formula_dict = {}
+    for sectors in sector_list:
+        magic_formula_dict[sectors] = []
+
+    # 각 섹터별 종목 이름, ROE, 1/PER 추가
+    for company in company_info_list:
+        sector = company[3]
+        company_name = company[1]
+        roe = company[8]
+        per_rev = 1 / company[6]
+        to_add_list = [company_name, roe, per_rev]
+        magic_formula_dict['전체'].append(to_add_list)
+        magic_formula_dict[sector].append(to_add_list)
+
+    # magic_formula_dict 내의 정보들을 pandas 객체로 바꾸고 rank 추가. rank 방법은 소수점을 없애기 위해 min 처리
+    for sector in magic_formula_dict:
+        magic_formula_dict[sector] = pd.DataFrame(magic_formula_dict[sector], columns = ['KEY', 'ROE', 'PER_REV'])
+        magic_formula_dict[sector]['ROE_RANK'] = magic_formula_dict[sector]['ROE'].rank(method='min')
+        magic_formula_dict[sector]['PER_REV_RANK'] = magic_formula_dict[sector]['PER_REV'].rank(method='min')
+        magic_formula_dict[sector]['COMP_RANK'] = magic_formula_dict[sector]['ROE_RANK'] + \
+                                                  magic_formula_dict[sector]['PER_REV_RANK']
+
+
+
+tmp_pd = pd.DataFrame(magic_formula_dict['전체'])
+tmp_pd['per_rev_rank'] = tmp_pd[2].rank(method='average')
+
+
+
+
+        pass
+
+
+
+
+'''
     # 다음은 모델 훈련 코드
+    # 
+    import ast
+    import tensorflow as tf
+    
+    loading_cls = loading()
+    # 훈련용
+    company_pickle, KOSPI_dict, KOSDAQ_dict, bond_dict, vkospi_dict, kosis_dict = loading_cls.loading_data(n_month=33)
+   
+    fgi = FGI()
+    fgi_dict = fgi.fear_greed_index(KOSPI_dict, KOSDAQ_dict, bond_dict['2y'], vkospi_dict)
+
+    date = list(fgi_dict.keys())[0]
+    year = int(date[:4])
+    month = int(date[5:7])
+    day = int(date[8:])
+    #
+    print(date)
+    date = list(fgi_dict.keys())[0]
+    year = int(date[:4])
+    month = int(date[5:7])
+    day = int(date[8:])
+    dnn= DNN()
+    company_dict = company_pickle[1]
+    market_meanstd = dnn.entire_market_meanstd(kosis_dict, company_dict, year, month, day)
+    
     dnn_training = DNN_Training()
-    test_list = dnn_training.entire_dnn_training_data(company_dict, fgi_dict, *market_meanstd)
+    test_list = dnn_training.entire_dnn_training_data(company_dict, fgi_dict, kosis_dict, *market_meanstd)
 
     random.shuffle(test_list)
     entire_training_np = np.array(test_list)
     entire_training_pd = pd.DataFrame(entire_training_np)
-    entire_training_pd.to_csv("training_data_2.csv", index=False)    
+    entire_training_pd.to_csv("training_data_3.csv", index=False)    
     
-    entire_training_pd = pd.read_csv("training_data_2.csv")
+    entire_training_pd = pd.read_csv("training_data_3.csv")
     entire_training_np = np.array(entire_training_pd)
     entire_training_list = entire_training_np.tolist()
     
-    # 
-    # for i in range(len(entire_training_list)):
-    #     temp.append(ast.literal_eval(entire_training_list[i][0]))
-    # 
-    # test_list = []
-    # for i in range(len(temp)):
-    #     if temp[i] != []:
-    #         for j in range(len(temp[i])):
-    #             test_list.append(temp[i][j])      
+    
+    temp = []
+    for i in range(len(entire_training_list)):
+        temp.append(ast.literal_eval(entire_training_list[i][0]))
+
+    test_list = []
+    for i in range(len(temp)):
+        if temp[i] != []:
+            for j in range(len(temp[i])):
+                test_list.append(temp[i][j])      
+
+    entire_training_np = np.array(test_list)
+
+    del entire_training_pd
+    del entire_training_list
+    del test_list
     
     training_data = entire_training_np[:-30000, :12]
     training_label = entire_training_np[:-30000, -1]
@@ -1250,21 +1493,15 @@ if __name__=="__main__":
             keras.layers.Dense(100, activation = 'relu', name = 'Dense_1'),
             keras.layers.Dense(5, activation = 'softmax', name = 'predictions')])
             
-        model.compile(optimizer = keras.optimizers.Adam(lr = 0.001, beta_1 = 0.9, beta_2 = 0.999), loss = 'sparse_categorical_crossentropy', metrics = ['accuracy'])
+        model.compile(optimizer = keras.optimizers.Adam(learning_rate = 0.001, beta_1 = 0.9, beta_2 = 0.999), loss = 'sparse_categorical_crossentropy', metrics = ['accuracy'])
         
         model.fit(training_data, training_label, batch_size = 1024, epochs=12800)
         model.fit(training_data, training_label, batch_size = 512, epochs=3200)
         
     model.evaluate(test_data, test_label, verbose = 2)
     
-    model.save('price_predict_dnn.h5')
-    model.save_weights('price_predict_dnn_weight')   
+    model.save('price_predict_dnn_v2.h5')
+    model.save_weights('price_predict_dnn_v2_weight')   
      
     model = keras.models.load_model('price_predict_dnn.h5')
-    '''
-
-
-    '''
-    
-    
-    '''
+'''
